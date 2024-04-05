@@ -329,49 +329,27 @@ void MIDBTMetadataUpdate(void *ctx, unsigned char *tmp)
         memset(context->mainText, 0, sizeof(context->mainText));
         char text[UTILS_DISPLAY_TEXT_SIZE] = {0};
 
-        if (strlen(context->bt->artist) > 0)
+        uint8_t mid_button = MID_BUTTON_ONE_L;
+
+        char artist[4];
+
+        for (int i = 0; i < 32; i+=4)
         {
-            char artist_l1[5] = "";
-            snprintf(artist_l1, sizeof(char) * 5, "%s", context->bt->artist);
-            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, artist_l1);
-
-            if (strlen(context->bt->artist) > 4)
+            for (int j = 0; j < 4; j++)
             {
-                char artist_r1[5] = "";
-                snprintf(artist_r1, sizeof(char) * 5, "%s", context->bt->artist+4);
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, artist_r1);
-
-                if (strlen(context->bt->artist) > 8)
+                if (strlen(context->bt->artist+i+j) > 0)
                 {
-                    char artist_l2[5] = "";
-                    snprintf(artist_l2, sizeof(char) * 5, "%s", context->bt->artist+8);
-                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, artist_l2);
-
-                    if (strlen(context->bt->artist) > 12)
-                    {
-                        char artist_r2[5] = "";
-                        snprintf(artist_r2, sizeof(char) * 5, "%s", context->bt->artist+12);
-                        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, artist_r2);
-                    }
-                    else
-                    {
-                       IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    "); 
-                    }
+                    //snprintf(artist+j, sizeof(char), "%s", context->bt->artist+i+j);
+                    artist[j] = context->bt->artist[i+j];
                 }
                 else
                 {
-                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
-                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
+                    //snprintf(artist+j, sizeof(char), "%s", " ");
+                    artist[j] = ' ';
                 }
-
             }
-            else
-            {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
-            }
-            
+            IBusCommandMIDMenuWriteSingle(context->ibus, mid_button, artist);
+            mid_button++;
         }
 
         snprintf(text, UTILS_DISPLAY_TEXT_SIZE, "%s", context->bt->title);
