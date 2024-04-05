@@ -18,7 +18,12 @@ void MIDInit(BT_t *bt, IBus_t *ibus)
     Context.tempDisplay = UtilsDisplayValueInit("", MID_DISPLAY_STATUS_OFF);
     Context.modeChangeStatus = MID_MODE_CHANGE_OFF;
     Context.menuContext = MenuSingleLineInit(ibus, bt, &MIDDisplayUpdateText, &Context);
-    strncpy(Context.mainText, "Bluetooth", 10);
+    //strncpy(Context.mainText, "Bluetooth", 10);
+    EventRegisterCallback(
+        BT_EVENT_DEVICE_LINK_CONNECTED,
+        &MIDBTDeviceConnected,
+        &Context
+    );
     EventRegisterCallback(
         BT_EVENT_DEVICE_LINK_DISCONNECTED,
         &MIDBTDeviceDisconnected,
@@ -82,6 +87,10 @@ void MIDInit(BT_t *bt, IBus_t *ibus)
  */
 void MIDDestroy()
 {
+    EventUnregisterCallback(
+        BT_EVENT_DEVICE_LINK_CONNECTED,
+        &MIDBTDeviceConnected
+    );
     EventUnregisterCallback(
         BT_EVENT_DEVICE_LINK_DISCONNECTED,
         &MIDBTDeviceDisconnected
@@ -205,15 +214,21 @@ static void MIDShowNextDevice(MIDContext_t *context, uint8_t direction)
 static void MIDMenuDevices(MIDContext_t *context)
 {
     context->mode = MID_MODE_DEVICES;
-    strncpy(context->mainText, "Devices", 8);
+    memset(context->mainText, 0, sizeof(context->mainText));
     context->btDeviceIndex = MID_PAIRING_DEVICE_NONE;
     MIDShowNextDevice(context, 0);
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_BACK, "Back");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, " Con");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PREV_VAL, "<   ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_NEXT_VAL, "   >");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_DEVICES_R, "   ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_DEVICES_L, "   ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "Conn");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "ect ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, " <  ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "  > ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, " Ret");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "urn ");
 }
 
 static void MIDMenuMain(MIDContext_t *context)
@@ -222,38 +237,46 @@ static void MIDMenuMain(MIDContext_t *context)
     strncpy(context->mainText, "Bluetooth", 10);
     MIDSetMainDisplayText(context, "", 0);
     MIDBTMetadataUpdate((void *) context, 0x00);
-    // This sucks
-    unsigned char mainMenuText[] = {
-        0x06,
-        'M','e','t','a',
-        0x06,
-        'S', 'e', 't', 't',
-        'i', 'n', 'g', 's',
-        0x06,
-        'D', 'e', 'v', 'i',
-        'c', 'e', 's', ' ',
-    };
-    IBusCommandMIDMenuWriteMany(context->ibus, 0x61, mainMenuText, sizeof(mainMenuText));
+
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "Sett");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "ings");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "    ");
+
     if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAYBACK, ">  ");
+        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
+        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
     } else {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAYBACK, "|| ");
+        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
+        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
     }
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PAIR, "Pair");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_MODE, "MODE");
 }
 
 static void MIDMenuSettings(MIDContext_t *context)
 {
     context->mode = MID_MODE_SETTINGS;
-    strncpy(context->mainText, "Settings", 9);
+    memset(context->mainText, 0, sizeof(context->mainText));
     MenuSingleLineSettings(&context->menuContext);
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_BACK, "Back");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Edit");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PREV_VAL, "<   ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_NEXT_VAL, "   >");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_DEVICES_R, "   ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_DEVICES_L, "   ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "Edit");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, " <  ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "  > ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "Devi");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "ces ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "Pair");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "ing ");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, " Ret");
+    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "urn ");
 }
 
 /**
@@ -278,71 +301,98 @@ void MIDDisplayUpdateText(void *ctx, char *text, int8_t timeout, uint8_t updateT
     }
 }
 
+void MIDBTDeviceConnected(void *ctx, unsigned char *tmp)
+{
+    MIDContext_t *context = (MIDContext_t *) ctx;
+    if (context->mode == MID_MODE_ACTIVE) {
+        memset(context->mainText, 0, sizeof(context->mainText));
+        MIDSetMainDisplayText(context, "Bluetooth connected :)", 0);
+    }
+}
+
 void MIDBTDeviceDisconnected(void *ctx, unsigned char *tmp)
 {
     MIDContext_t *context = (MIDContext_t *) ctx;
     if (context->mode == MID_MODE_ACTIVE) {
-        MIDSetMainDisplayText(context, "", 0);
+        memset(context->mainText, 0, sizeof(context->mainText));
+        MIDSetMainDisplayText(context, "Bluetooth disconnected", 0);
     }
 }
-
 
 void MIDBTMetadataUpdate(void *ctx, unsigned char *tmp)
 {
     MIDContext_t *context = (MIDContext_t *) ctx;
-    if (context->mode != MID_MODE_ACTIVE ||
-        strlen(context->bt->title) == 0 ||
-        ConfigGetSetting(CONFIG_SETTING_METADATA_MODE) == MID_SETTING_METADATA_MODE_OFF
-    ) {
-        return;
-    }
-    char text[UTILS_DISPLAY_TEXT_SIZE] = {0};
-    if (strlen(context->bt->artist) > 0 && strlen(context->bt->album) > 0) {
-        snprintf(
-            text,
-            UTILS_DISPLAY_TEXT_SIZE,
-            "%s - %s on %s",
-            context->bt->title,
-            context->bt->artist,
-            context->bt->album
-        );
-    } else if (strlen(context->bt->artist) > 0) {
-        snprintf(
-            text,
-            UTILS_DISPLAY_TEXT_SIZE,
-            "%s - %s",
-            context->bt->title,
-            context->bt->artist
-        );
-    } else if (strlen(context->bt->album) > 0) {
-        snprintf(
-            text,
-            UTILS_DISPLAY_TEXT_SIZE ,
-            "%s on %s",
-            context->bt->title,
-            context->bt->album
-        );
-    } else {
+    if (context->mode == MID_MODE_ACTIVE &&
+        strlen(context->bt->title) > 0 &&
+        ConfigGetSetting(CONFIG_SETTING_METADATA_MODE) != MID_SETTING_METADATA_MODE_OFF)
+    {
+        memset(context->mainText, 0, sizeof(context->mainText));
+        char text[UTILS_DISPLAY_TEXT_SIZE] = {0};
+
+        if (strlen(context->bt->artist) > 0)
+        {
+            char artist_l1[5] = "";
+            snprintf(artist_l1, sizeof(char) * 5, "%s", context->bt->artist);
+            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, artist_l1);
+
+            if (strlen(context->bt->artist) > 4)
+            {
+                char artist_r1[5] = "";
+                snprintf(artist_r1, sizeof(char) * 5, "%s", context->bt->artist+4);
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, artist_r1);
+
+                if (strlen(context->bt->artist) > 8)
+                {
+                    char artist_l2[5] = "";
+                    snprintf(artist_l2, sizeof(char) * 5, "%s", context->bt->artist+8);
+                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, artist_l2);
+
+                    if (strlen(context->bt->artist) > 12)
+                    {
+                        char artist_r2[5] = "";
+                        snprintf(artist_r2, sizeof(char) * 5, "%s", context->bt->artist+12);
+                        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, artist_r2);
+                    }
+                    else
+                    {
+                       IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    "); 
+                    }
+                }
+                else
+                {
+                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
+                    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
+                }
+
+            }
+            else
+            {
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
+            }
+            
+        }
+
         snprintf(text, UTILS_DISPLAY_TEXT_SIZE, "%s", context->bt->title);
+
+        MIDSetMainDisplayText(context, text, 3000 / MID_DISPLAY_SCROLL_SPEED);
+        TimerTriggerScheduledTask(context->displayUpdateTaskId);
     }
-    MIDSetMainDisplayText(context, text, 3000 / MID_DISPLAY_SCROLL_SPEED);
-    TimerTriggerScheduledTask(context->displayUpdateTaskId);
 }
 
 void MIDBTPlaybackStatus(void *ctx, unsigned char *tmp)
 {
     MIDContext_t *context = (MIDContext_t *) ctx;
-    if (context->mode != MID_MODE_ACTIVE) {
-        return;
-    }
-    if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
-        IBusCommandMIDMenuWriteSingle(context->ibus, 0, " >");
-        BTCommandGetMetadata(context->bt);
-    } else {
-        if (ConfigGetSetting(CONFIG_SETTING_METADATA_MODE) != MID_SETTING_METADATA_MODE_OFF) {
-            MIDSetMainDisplayText(context, "Paused", 0);
+    if (context->mode == MID_MODE_ACTIVE) {
+        if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
+            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
+            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
+        } else {
+            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
+            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
         }
-        IBusCommandMIDMenuWriteSingle(context->ibus, 0, "|| ");
+        BTCommandGetMetadata(context->bt);
     }
 }
 
@@ -409,38 +459,73 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
 {
     MIDContext_t *context = (MIDContext_t *) ctx;
     unsigned char btnPressed = pkt[6];
+
     if (context->mode == MID_MODE_ACTIVE) {
-        if (btnPressed == MID_BUTTON_PLAYBACK) {
+
+        if (btnPressed == MID_BUTTON_PLAY_L || btnPressed == MID_BUTTON_PLAY_R)
+        {
             if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
                 BTCommandPause(context->bt);
-                IBusCommandMIDMenuWriteSingle(context->ibus, 0, "|| ");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
             } else {
                 BTCommandPlay(context->bt);
-                IBusCommandMIDMenuWriteSingle(context->ibus, 0, ">  ");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
             }
-        } else if (btnPressed == MID_BUTTON_META) {
+        /*} else if (btnPressed == MID_BUTTON_META) {
             if (context->mode == MID_MODE_ACTIVE) {
                 context->mode = MID_MODE_DISPLAY_OFF;
             } else {
                 context->mode = MID_MODE_ACTIVE_NEW;
-            }
+            }*/
         } else if (btnPressed == MID_BUTTON_SETTINGS_L ||
                    btnPressed == MID_BUTTON_SETTINGS_R
         ) {
             context->mode = MID_MODE_SETTINGS_NEW;
-        }  else if (btnPressed == MID_BUTTON_DEVICES_L ||
-                    btnPressed == MID_BUTTON_DEVICES_R
-        ) {
+        }
+    }
+    else if (context->mode == MID_MODE_SETTINGS)
+    {
+        if (btnPressed == MID_BUTTON_RETURN_L || btnPressed == MID_BUTTON_RETURN_R)
+        {
+            context->mode = MID_MODE_ACTIVE_NEW;
+        }
+        else if (btnPressed == MID_BUTTON_EDIT_SAVE)
+        {
+            if (context->menuContext.settingMode == MENU_SINGLELINE_SETTING_MODE_SCROLL_SETTINGS)
+            {
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Save");
+            }
+            else
+            {
+                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Edit");
+            }
+
+            MenuSingleLineSettingsEditSave(&context->menuContext);
+        }
+        else if (btnPressed == MID_BUTTON_PREV_VAL)
+        {
+            MenuSingleLineSettingsScroll(&context->menuContext, 0x01);
+        }
+        else if (btnPressed == MID_BUTTON_PREV_VAL || btnPressed == MID_BUTTON_NEXT_VAL)
+        {
+            MenuSingleLineSettingsScroll(&context->menuContext, 0x00);
+        }
+        else if (btnPressed == MID_BUTTON_DEVICES_L || btnPressed == MID_BUTTON_DEVICES_R)
+        {
             context->mode = MID_MODE_DEVICES_NEW;
-        } else if (btnPressed == MID_BUTTON_PAIR) {
+        } 
+        else if (btnPressed == MID_BUTTON_PAIR_L || btnPressed == MID_BUTTON_PAIR_R)
+        {
             // Toggle the discoverable state
             uint8_t state;
             int8_t timeout = 1500 / MID_DISPLAY_SCROLL_SPEED;
             if (context->bt->discoverable == BT_STATE_ON) {
-                MIDSetTempDisplayText(context, "Pairing Off", timeout);
+                MIDSetTempDisplayText(context, "Pairing mode off", timeout);
                 state = BT_STATE_OFF;
             } else {
-                MIDSetTempDisplayText(context, "Pairing On", timeout);
+                MIDSetTempDisplayText(context, "Pairing mode on", timeout);
                 state = BT_STATE_ON;
                 if (context->bt->activeDevice.deviceId != 0) {
                     // To pair a new device, we must disconnect the active one
@@ -448,32 +533,19 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
                 }
             }
             BTCommandSetDiscoverable(context->bt, state);
-            context->mode = MID_MODE_DISPLAY_OFF;
+            //context->mode = MID_MODE_DISPLAY_OFF;
         }
-    } else if (context->mode == MID_MODE_SETTINGS) {
-        if (btnPressed == MID_BUTTON_BACK) {
-            context->mode = MID_MODE_ACTIVE_NEW;
-        } else if (btnPressed == MID_BUTTON_EDIT_SAVE) {
-            if (context->menuContext.settingMode == MENU_SINGLELINE_SETTING_MODE_SCROLL_SETTINGS) {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Save");
-            } else {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Edit");
-            }
-            MenuSingleLineSettingsEditSave(&context->menuContext);
-        }  else if (btnPressed == MID_BUTTON_PREV_VAL ||
-                   btnPressed == MID_BUTTON_NEXT_VAL
-        ) {
-            uint8_t direction = 0x00;
-            if (btnPressed == MID_BUTTON_PREV_VAL) {
-                direction = 0x01;
-            }
-            MenuSingleLineSettingsScroll(&context->menuContext, direction);
+    }
+    else if (context->mode == MID_MODE_DEVICES)
+    {
+        if (btnPressed == MID_BUTTON_RETURN_L || btnPressed == MID_BUTTON_RETURN_R)
+        {
+            context->mode = MID_MODE_SETTINGS_NEW;
         }
-    } else if (context->mode == MID_MODE_DEVICES) {
-        if (btnPressed == MID_BUTTON_BACK) {
-            context->mode = MID_MODE_ACTIVE_NEW;
-        } else if (btnPressed == MID_BUTTON_EDIT_SAVE) {
-            if (context->bt->pairedDevicesCount > 0) {
+        else if (btnPressed == MID_BUTTON_CONNECT_L || btnPressed == MID_BUTTON_CONNECT_R)
+        {
+            if (context->bt->pairedDevicesCount > 0)
+            {
                 // Connect to device
                 BTPairedDevice_t *dev = &context->bt->pairedDevices[context->btDeviceIndex];
                 if (memcmp(dev->macId, context->bt->activeDevice.macId, BT_LEN_MAC_ID) != 0 &&
@@ -486,17 +558,20 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
                     );
                 }
             }
-        } else if (btnPressed == MID_BUTTON_PREV_VAL ||
-                   btnPressed == MID_BUTTON_NEXT_VAL
-        ) {
+        }
+        else if (btnPressed == MID_BUTTON_PREV_VAL || btnPressed == MID_BUTTON_NEXT_VAL)
+        {
             MIDShowNextDevice(context, btnPressed);
         }
     }
+
+    /*
     if (btnPressed == MID_BUTTON_MODE && pkt[IBUS_PKT_DST] == IBUS_DEVICE_TEL) {
         // Close TEL UI
         IBusCommandMIDSetMode(context->ibus, IBUS_DEVICE_TEL, 0x00);
         context->modeChangeStatus = MID_MODE_CHANGE_PRESS;
     }
+
     if (btnPressed == MID_BUTTON_MODE &&
         pkt[IBUS_PKT_DST] == IBUS_DEVICE_RAD &&
         context->modeChangeStatus == MID_MODE_CHANGE_RELEASE
@@ -504,18 +579,14 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
         IBusCommandMIDButtonPress(context->ibus, IBUS_DEVICE_RAD, MID_BUTTON_MODE_RELEASE);
         context->modeChangeStatus = MID_MODE_CHANGE_OFF;
     }
+    */
+
     // Handle Next and Previous
     if (context->ibus->cdChangerFunction != IBUS_CDC_FUNC_NOT_PLAYING) {
         if (btnPressed == IBus_MID_BTN_TEL_RIGHT_RELEASE) {
             BTCommandPlaybackTrackNext(context->bt);
         } else if (btnPressed == IBus_MID_BTN_TEL_LEFT_RELEASE) {
             BTCommandPlaybackTrackPrevious(context->bt);
-        }
-    }
-    // Hijack the "TAPE/CD/MD" button
-    if (ConfigGetSetting(CONFIG_SETTING_SELF_PLAY) == CONFIG_SETTING_ON) {
-        if (btnPressed == MID_BUTTON_BT || btnPressed == MID_BUTTON_MODE) {
-            IBusCommandRADCDCRequest(context->ibus, IBUS_CDC_CMD_START_PLAYING);
         }
     }
 }
@@ -539,7 +610,7 @@ void MIDIIBusRADMIDDisplayUpdate(void *ctx, unsigned char *pkt)
              context->mode == MID_MODE_DISPLAY_OFF) &&
             context->modeChangeStatus == MID_MODE_CHANGE_OFF
         ) {
-            IBusCommandMIDDisplayRADTitleText(context->ibus, "Bluetooth");
+            IBusCommandMIDDisplayRADTitleText(context->ibus, "");
         }
     }
 }
@@ -585,7 +656,7 @@ void MIDIBusMIDModeChange(void *ctx, unsigned char *pkt)
             context->ibus->cdChangerFunction == IBUS_CDC_FUNC_NOT_PLAYING &&
             ConfigGetSetting(CONFIG_SETTING_SELF_PLAY) == CONFIG_SETTING_ON
         ) {
-            IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_BT, "BT");
+            //IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_BT, "BT");
         }
     } else {
         // This should be 0x8F, which is "close TEL UI"
