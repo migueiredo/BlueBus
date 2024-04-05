@@ -18,7 +18,6 @@ void MIDInit(BT_t *bt, IBus_t *ibus)
     Context.tempDisplay = UtilsDisplayValueInit("", MID_DISPLAY_STATUS_OFF);
     Context.modeChangeStatus = MID_MODE_CHANGE_OFF;
     Context.menuContext = MenuSingleLineInit(ibus, bt, &MIDDisplayUpdateText, &Context);
-    //strncpy(Context.mainText, "Bluetooth", 10);
     EventRegisterCallback(
         BT_EVENT_DEVICE_LINK_CONNECTED,
         &MIDBTDeviceConnected,
@@ -339,12 +338,10 @@ void MIDBTMetadataUpdate(void *ctx, unsigned char *tmp)
             {
                 if (strlen(context->bt->artist+i+j) > 0)
                 {
-                    //snprintf(artist+j, sizeof(char), "%s", context->bt->artist+i+j);
                     artist[j] = context->bt->artist[i+j];
                 }
                 else
                 {
-                    //snprintf(artist+j, sizeof(char), "%s", " ");
                     artist[j] = ' ';
                 }
             }
@@ -451,12 +448,6 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
                 IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
                 IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
             }
-        /*} else if (btnPressed == MID_BUTTON_META) {
-            if (context->mode == MID_MODE_ACTIVE) {
-                context->mode = MID_MODE_DISPLAY_OFF;
-            } else {
-                context->mode = MID_MODE_ACTIVE_NEW;
-            }*/
         } else if (btnPressed == MID_BUTTON_SETTINGS_L ||
                    btnPressed == MID_BUTTON_SETTINGS_R
         ) {
@@ -511,7 +502,6 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
                 }
             }
             BTCommandSetDiscoverable(context->bt, state);
-            //context->mode = MID_MODE_DISPLAY_OFF;
         }
     }
     else if (context->mode == MID_MODE_DEVICES)
@@ -542,22 +532,6 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
             MIDShowNextDevice(context, btnPressed);
         }
     }
-
-    /*
-    if (btnPressed == MID_BUTTON_MODE && pkt[IBUS_PKT_DST] == IBUS_DEVICE_TEL) {
-        // Close TEL UI
-        IBusCommandMIDSetMode(context->ibus, IBUS_DEVICE_TEL, 0x00);
-        context->modeChangeStatus = MID_MODE_CHANGE_PRESS;
-    }
-
-    if (btnPressed == MID_BUTTON_MODE &&
-        pkt[IBUS_PKT_DST] == IBUS_DEVICE_RAD &&
-        context->modeChangeStatus == MID_MODE_CHANGE_RELEASE
-    ) {
-        IBusCommandMIDButtonPress(context->ibus, IBUS_DEVICE_RAD, MID_BUTTON_MODE_RELEASE);
-        context->modeChangeStatus = MID_MODE_CHANGE_OFF;
-    }
-    */
 
     // Handle Next and Previous
     if (context->ibus->cdChangerFunction != IBUS_CDC_FUNC_NOT_PLAYING) {
@@ -629,12 +603,6 @@ void MIDIBusMIDModeChange(void *ctx, unsigned char *pkt)
         ) {
             IBusCommandMIDButtonPress(context->ibus, IBUS_DEVICE_RAD, MID_BUTTON_MODE_PRESS);
             context->modeChangeStatus = MID_MODE_CHANGE_RELEASE;
-        }
-        if (pkt[IBUS_PKT_DB2] == IBUS_MID_UI_RADIO_OPEN &&
-            context->ibus->cdChangerFunction == IBUS_CDC_FUNC_NOT_PLAYING &&
-            ConfigGetSetting(CONFIG_SETTING_SELF_PLAY) == CONFIG_SETTING_ON
-        ) {
-            //IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_BT, "BT");
         }
     } else {
         // This should be 0x8F, which is "close TEL UI"
