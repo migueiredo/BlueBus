@@ -1,0 +1,53 @@
+# Standalone XC16 build for Linux, mirroring the MPLAB X "production" image
+# from nbproject/configurations.xml. Usage:
+#   make -f Makefile.linux            # -> build/linux/application.hex
+#   make -f Makefile.linux clean
+# Override the toolchain location with XC16_DIR=/path/to/xc16/vX.YY
+
+XC16_DIR ?= /opt/microchip/xc16/v2.10
+CC := $(XC16_DIR)/bin/xc16-gcc
+BIN2HEX := $(XC16_DIR)/bin/xc16-bin2hex
+
+MCU := 24FJ1024GA606
+OUT := build/linux
+
+# Optional device family pack, only if one is installed separately
+ifneq ($(DFP_DIR),)
+DFP := -mdfp="$(DFP_DIR)/xc16"
+endif
+
+CFLAGS := -mcpu=$(MCU) -mno-eds-warn -omf=elf -DXPRJ_application=application \
+	-mlarge-code -mlarge-data -mlarge-scalar -O1 -msmart-io=1 \
+	-Werror -Wall -Wcast-align -msfr-warn=on -D _ADDED_C_LIB $(DFP)
+ASFLAGS := -mcpu=$(MCU) -omf=elf -DXPRJ_application=application \
+	-Wa,--defsym=__MPLAB_BUILD=1,--no-relax $(DFP)
+LDFLAGS := -mcpu=$(MCU) -omf=elf -DXPRJ_application=application \
+	-Wl,--local-stack,--defsym=__MPLAB_BUILD=1,--script=application.gld,--heap=0,--stack=16,--check-sections,--data-init,--pack-data,--handles,--isr,--no-gc-sections,--fill-upper=0,--stackguard=16,--no-force-link,--smart-io,-Map=$(OUT)/application.map,--report-mem,--warn-section-align \
+	$(DFP)
+
+C_SRCS := $(shell find . -path ./build -prune -o -name '*.c' -print | sed 's|^\./||')
+S_SRCS := lib/sfr_setters.s
+OBJS := $(addprefix $(OUT)/obj/,$(C_SRCS:.c=.o) $(S_SRCS:.s=.o))
+
+.PHONY: all clean
+all: $(OUT)/application.hex
+
+$(OUT)/application.hex: $(OUT)/application.elf
+	$(BIN2HEX) $< -a -omf=elf
+	@echo "Built $@"
+
+$(OUT)/application.elf: $(OBJS) application.gld
+	$(CC) -o $@ $(OBJS) $(LDFLAGS)
+
+$(OUT)/obj/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $< -o $@ -c -MP -MMD -MF $(@:.o=.d) $(CFLAGS)
+
+$(OUT)/obj/%.o: %.s
+	@mkdir -p $(dir $@)
+	$(CC) $< -o $@ -c $(ASFLAGS)
+
+clean:
+	rm -rf $(OUT)
+
+-include $(OBJS:.o=.d)
