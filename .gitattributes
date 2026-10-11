@@ -1,0 +1,9 @@
+# Store text with LF in the repo; check out with native line endings
+* text=auto
+
+# Binary formats
+*.exe binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.pdf binary

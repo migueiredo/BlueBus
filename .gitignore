@@ -20,3 +20,4 @@
 /hardware/v*/BlueBus.bom
 /hardware/eagle.epf
 BlueBus_Firmware_Tool_v_1_4.exe
+/utility/.venv/
