@@ -330,13 +330,14 @@ void MIDBTMetadataUpdate(void *ctx, unsigned char *tmp)
 
         uint8_t mid_button = MID_BUTTON_ONE_L;
 
-        char artist[4];
+        char artist[IBus_MID_MENU_MAX_CHARS + 1] = {0};
+        size_t artistLength = strlen(context->bt->artist);
 
         for (int i = 0; i < 32; i+=4)
         {
             for (int j = 0; j < 4; j++)
             {
-                if (strlen(context->bt->artist+i+j) > 0)
+                if (i + j < artistLength)
                 {
                     artist[j] = context->bt->artist[i+j];
                 }
