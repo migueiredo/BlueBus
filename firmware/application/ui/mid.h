@@ -44,6 +44,21 @@
 #define MID_BUTTON_RETURN_L MID_BUTTON_SIX_L
 #define MID_BUTTON_RETURN_R MID_BUTTON_SIX_R
 
+// The menu row is laid out by the MID as six two-cell pairs. A 0x06 in a
+// multi-cell write moves to the next pair, whose text (up to 8 chars) is
+// centered unless padded with spaces.
+#define MID_MENU_PAIRS 6
+#define MID_MENU_PAIR_CHARS 8
+#define MID_MENU_PAIR_SEPARATOR 0x06
+#define MID_MENU_PAIR_START_IDX 0x40
+// The MID ignores frames of 34 bytes or more, so cap the whole I-Bus
+// message at 33: 4 bytes of framing and 4 of menu header leave 25 for text
+#define MID_MENU_FRAME_MAX_LENGTH 33
+#define MID_MENU_FRAME_MAX_DATA (MID_MENU_FRAME_MAX_LENGTH - 8)
+#define MID_MENU_PAIR_EDIT_SAVE 0
+#define MID_MENU_PAIR_PLAY 5
+#define MID_MENU_ARTIST_PAIRS 4
+
 #define MID_BUTTON_MODE_PRESS 0x0B
 #define MID_BUTTON_MODE_RELEASE 0x4B
 

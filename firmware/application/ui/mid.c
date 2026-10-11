@@ -206,23 +206,72 @@ static void MIDSetTempDisplayText(
     TimerTriggerScheduledTask(context->displayUpdateTaskId);
 }
 
+/**
+ * MIDMenuWritePairs()
+ *     Description:
+ *         Write the menu row as its six two-cell pairs, using as few frames
+ *         as the I-Bus message size allows.
+ *     Params:
+ *         MIDContext_t *context - The MID context
+ *         const char *pairs[] - Text for each pair. 0 leaves the pair as it
+ *             is, an empty string blanks it.
+ *     Returns:
+ *         void
+ */
+static void MIDMenuWritePairs(MIDContext_t *context, const char *pairs[MID_MENU_PAIRS])
+{
+    uint8_t frame[MID_MENU_FRAME_MAX_DATA];
+    uint8_t length = 0;
+    // The pair the next separator in this frame will move to
+    uint8_t nextPair = 0;
+    uint8_t i;
+    for (i = 0; i < MID_MENU_PAIRS; i++) {
+        if (pairs[i] == 0) {
+            continue;
+        }
+        const char *text = pairs[i];
+        uint8_t textLength = strlen(text);
+        if (textLength == 0) {
+            // An empty field leaves the pair untouched, a space clears it
+            text = " ";
+            textLength = 1;
+        }
+        if (textLength > MID_MENU_PAIR_CHARS) {
+            textLength = MID_MENU_PAIR_CHARS;
+        }
+        uint8_t separators = i - nextPair + 1;
+        if (length + separators + textLength > MID_MENU_FRAME_MAX_DATA) {
+            IBusCommandMIDMenuWriteMany(context->ibus, MID_MENU_PAIR_START_IDX, frame, length);
+            length = 0;
+            nextPair = 0;
+            separators = i + 1;
+        }
+        memset(frame + length, MID_MENU_PAIR_SEPARATOR, separators);
+        length += separators;
+        memcpy(frame + length, text, textLength);
+        length += textLength;
+        nextPair = i + 1;
+    }
+    if (length > 0) {
+        IBusCommandMIDMenuWriteMany(context->ibus, MID_MENU_PAIR_START_IDX, frame, length);
+    }
+}
+
+static const char *MIDPlaybackLabel(MIDContext_t *context)
+{
+    if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
+        return "|| Pause";
+    }
+    return "|> Play ";
+}
+
 static void MIDDisplayOBC(MIDContext_t *context)
 {
     context->mode = MID_MODE_OBC;
     memset(context->mainText, 0, sizeof(context->mainText));
     MenuSingleLineOBC(&context->menuContext);
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, " Ret");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "urn ");
+    const char *pairs[MID_MENU_PAIRS] = {"", "", "", "", "", "Return"};
+    MIDMenuWritePairs(context, pairs);
 }
 
 static void MIDMenuDevices(MIDContext_t *context)
@@ -230,18 +279,8 @@ static void MIDMenuDevices(MIDContext_t *context)
     context->mode = MID_MODE_DEVICES;
     memset(context->mainText, 0, sizeof(context->mainText));
     MenuSingleLineDevices(&context->menuContext, 0);
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "Conn");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "ect ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, " <  ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "  > ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, " Ret");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "urn ");
+    const char *pairs[MID_MENU_PAIRS] = {"Connect", " <    > ", "", "", "", "Return"};
+    MIDMenuWritePairs(context, pairs);
 }
 
 static void MIDMenuMain(MIDContext_t *context)
@@ -250,26 +289,9 @@ static void MIDMenuMain(MIDContext_t *context)
     context->displayMetadata = MID_DISPLAY_METADATA_ON;
     memset(context->mainText, 0x00, 16);
     MIDSetMainDisplayText(context, "Bluetooth", 0);
-
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "Sett");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "ings");
-
-    if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
-    } else {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
-    }
-    // Write metadata last so the artist overwrites the blanked cells
+    const char *pairs[MID_MENU_PAIRS] = {"", "", "", "", "Settings", MIDPlaybackLabel(context)};
+    MIDMenuWritePairs(context, pairs);
+    // Write metadata last so the artist overwrites the blanked pairs
     MIDBTMetadataUpdate((void *) context, 0x00);
 }
 
@@ -278,18 +300,26 @@ static void MIDMenuSettings(MIDContext_t *context)
     context->mode = MID_MODE_SETTINGS;
     memset(context->mainText, 0, sizeof(context->mainText));
     MenuSingleLineSettings(&context->menuContext);
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_L, "Edit");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_ONE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_L, " <  ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TWO_R, "  > ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_L, "OBC ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_TRE_R, "    ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_L, "Devi");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FOR_R, "ces ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_L, "Pair");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_FIV_R, "ing ");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_L, " Ret");
-    IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_SIX_R, "urn ");
+    const char *pairs[MID_MENU_PAIRS] = {"Edit", " <    > ", "OBC", "Devices", "Pairing", "Return"};
+    MIDMenuWritePairs(context, pairs);
+}
+
+/**
+ * MIDMenuWritePair()
+ *     Description:
+ *         Write a single menu pair, leaving the others as they are
+ *     Params:
+ *         MIDContext_t *context - The MID context
+ *         uint8_t pair - The pair index, 0 - 5
+ *         const char *text - The text to write
+ *     Returns:
+ *         void
+ */
+static void MIDMenuWritePair(MIDContext_t *context, uint8_t pair, const char *text)
+{
+    const char *pairs[MID_MENU_PAIRS] = {0};
+    pairs[pair] = text;
+    MIDMenuWritePairs(context, pairs);
 }
 
 /**
@@ -343,23 +373,26 @@ void MIDBTMetadataUpdate(void *ctx, unsigned char *tmp)
         return;
     }
     memset(context->mainText, 0, sizeof(context->mainText));
-    // Spread the artist across the first eight menu cells, four chars each
-    char artist[IBUS_MID_MENU_MAX_CHARS + 1] = {0};
+    // Spread the artist across the first four pairs, padded with spaces so
+    // the MID keeps it left-aligned rather than centering each chunk
+    char artist[MID_MENU_ARTIST_PAIRS][MID_MENU_PAIR_CHARS + 1];
+    const char *pairs[MID_MENU_PAIRS] = {0};
     size_t artistLength = strlen(context->bt->artist);
-    uint8_t midButton = MID_BUTTON_ONE_L;
     uint8_t i;
-    for (i = 0; i < 32; i += IBUS_MID_MENU_MAX_CHARS) {
+    for (i = 0; i < MID_MENU_ARTIST_PAIRS; i++) {
         uint8_t j;
-        for (j = 0; j < IBUS_MID_MENU_MAX_CHARS; j++) {
-            if (i + j < artistLength) {
-                artist[j] = context->bt->artist[i + j];
+        for (j = 0; j < MID_MENU_PAIR_CHARS; j++) {
+            size_t artistIdx = (i * MID_MENU_PAIR_CHARS) + j;
+            if (artistIdx < artistLength) {
+                artist[i][j] = context->bt->artist[artistIdx];
             } else {
-                artist[j] = ' ';
+                artist[i][j] = ' ';
             }
         }
-        IBusCommandMIDMenuWriteSingle(context->ibus, midButton, artist);
-        midButton++;
+        artist[i][MID_MENU_PAIR_CHARS] = '\0';
+        pairs[i] = artist[i];
     }
+    MIDMenuWritePairs(context, pairs);
     MIDSetMainDisplayText(context, context->bt->title, 3000 / MID_DISPLAY_SCROLL_SPEED);
     TimerTriggerScheduledTask(context->displayUpdateTaskId);
 }
@@ -371,15 +404,13 @@ void MIDBTPlaybackStatus(void *ctx, unsigned char *tmp)
         return;
     }
     if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
+        MIDMenuWritePair(context, MID_MENU_PAIR_PLAY, "|| Pause");
         // Redisplay the metadata on unpause, in case it has not changed
         if (strlen(context->bt->title) > 0) {
             MIDBTMetadataUpdate((void *) context, 0x00);
         }
     } else {
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
-        IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
+        MIDMenuWritePair(context, MID_MENU_PAIR_PLAY, "|> Play ");
     }
     BTCommandGetMetadata(context->bt);
 }
@@ -460,11 +491,9 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
     if (context->mode == MID_MODE_ACTIVE) {
         if (btnPressed == MID_BUTTON_PLAY_L || btnPressed == MID_BUTTON_PLAY_R) {
             if (context->bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|> P");
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "lay ");
+                MIDMenuWritePair(context, MID_MENU_PAIR_PLAY, "|> Play ");
             } else {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_L, "|| P");
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_PLAY_R, "ause");
+                MIDMenuWritePair(context, MID_MENU_PAIR_PLAY, "|| Pause");
             }
             BTCommandPlaybackToggle(context->bt);
         } else if (
@@ -478,9 +507,9 @@ void MIDIBusMIDButtonPress(void *ctx, unsigned char *pkt)
             context->mode = MID_MODE_ACTIVE_NEW;
         } else if (btnPressed == MID_BUTTON_EDIT_SAVE) {
             if (context->menuContext.settingMode == MENU_SINGLELINE_SETTING_MODE_SCROLL_SETTINGS) {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Save");
+                MIDMenuWritePair(context, MID_MENU_PAIR_EDIT_SAVE, "Save");
             } else {
-                IBusCommandMIDMenuWriteSingle(context->ibus, MID_BUTTON_EDIT_SAVE, "Edit");
+                MIDMenuWritePair(context, MID_MENU_PAIR_EDIT_SAVE, "Edit");
             }
             MenuSingleLineSettingsEditSave(&context->menuContext);
         } else if (
