@@ -6,17 +6,9 @@
  */
 #ifndef IBUS_H
 #define IBUS_H
-#include <math.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <string.h>
-#include "../mappings.h"
-#include "char_queue.h"
-#include "log.h"
-#include "event.h"
-#include "ibus.h"
-#include "timer.h"
 #include "uart.h"
-#include "utils.h"
 
 // Devices
 #define IBUS_DEVICE_GM 0x00 /* Body module */
@@ -39,6 +31,7 @@
 #define IBUS_DEVICE_NAVE 0x7F /* Navigation (Europe) */
 #define IBUS_DEVICE_IKE 0x80 /* Instrument cluster electronics */
 #define IBUS_DEVICE_SES 0xB0 /* Speach recognition system */
+#define IBUS_DEVICE_JNAV 0xBB /* Japanese Navigation */
 #define IBUS_DEVICE_GLO 0xBF /* Global, broadcast address */
 #define IBUS_DEVICE_MID 0xC0 /* Multi-info display */
 #define IBUS_DEVICE_TEL 0xC8 /* Telephone */
@@ -60,6 +53,21 @@
 #define IBUS_PKT_DB1 4
 #define IBUS_PKT_DB2 5
 #define IBUS_PKT_DB3 6
+#define IBUS_PKT_DB4 7
+#define IBUS_PKT_DB5 8
+#define IBUS_PKT_DB6 9
+#define IBUS_PKT_DB7 10
+#define IBUS_PKT_DB8 11
+#define IBUS_PKT_DB9 12
+#define IBUS_PKT_DB10 13
+#define IBUS_PKT_DB11 14
+#define IBUS_PKT_DB12 15
+#define IBUS_PKT_DB13 16
+#define IBUS_PKT_DB14 17
+
+// IBus Message Priorities
+#define IBUS_MSG_PRIORITY_NORMAL 0
+#define IBUS_MSG_PRIORITY_HIGH 1
 
 // IBus Commands
 #define IBUS_COMMAND_CDC_REQUEST 0x38
@@ -96,29 +104,39 @@
 #define IBUS_CDC_DISC_LOADED_7 0x40
 #define IBUS_CDC_DISC_LOADED_ALL 0x3F
 
+// BMBT status
+#define IBUS_VIDEO_SOURCE_NAV_GT 0
+#define IBUS_VIDEO_SOURCE_TV 1
+#define IBUS_VIDEO_SOURCE_VM_GT 2
+
+// PDC Status
+#define IBUS_PDC_STATUS_INACTIVE 0
+#define IBUS_PDC_STATUS_ACTIVE 1
+
 // DSP
 #define IBUS_DSP_CMD_CONFIG_SET 0x36
 #define IBUS_DSP_CONFIG_SET_INPUT_RADIO 0xA1
 #define IBUS_DSP_CONFIG_SET_INPUT_SPDIF 0xA0
 
 // All buttons presses are triggered on the "Push" message
-#define IBUS_DEVICE_BMBT_Button_Next 0x00
-#define IBUS_DEVICE_BMBT_Button_Prev 0x10
-#define IBUS_DEVICE_BMBT_Button_Mode 0x23
-#define IBUS_DEVICE_BMBT_Button_PlayPause 0x14
-#define IBUS_DEVICE_BMBT_Button_Knob 0x05
-#define IBUS_DEVICE_BMBT_Button_Display 0x30
-#define IBUS_DEVICE_BMBT_Button_Info 0x38
-#define IBUS_DEVICE_BMBT_Button_SEL 0x0F
-#define IBUS_DEVICE_BMBT_Button_Num1 0x11
-#define IBUS_DEVICE_BMBT_Button_Num2 0x01
-#define IBUS_DEVICE_BMBT_Button_Num3 0x12
-#define IBUS_DEVICE_BMBT_Button_Num4 0x02
-#define IBUS_DEVICE_BMBT_Button_Num5 0x13
-#define IBUS_DEVICE_BMBT_Button_Num6 0x03
-#define IBUS_DEVICE_BMBT_Button_TEL_Press 0x08
-#define IBUS_DEVICE_BMBT_Button_TEL_Hold 0x48
-#define IBUS_DEVICE_BMBT_Button_TEL_Release 0x88
+#define IBUS_DEVICE_BMBT_BUTTON_NEXT 0x00
+#define IBUS_DEVICE_BMBT_BUTTON_PREV 0x10
+#define IBUS_DEVICE_BMBT_BUTTON_MODE 0x23
+#define IBUS_DEVICE_BMBT_BUTTON_PLAY_PAUSE 0x14
+#define IBUS_DEVICE_BMBT_BUTTON_KNOB 0x05
+#define IBUS_DEVICE_BMBT_BUTTON_DISPLAY 0x30
+#define IBUS_DEVICE_BMBT_BUTTON_INFO 0x38
+#define IBUS_DEVICE_BMBT_BUTTON_SEL 0x0F
+#define IBUS_DEVICE_BMBT_BUTTON_NUM1 0x11
+#define IBUS_DEVICE_BMBT_BUTTON_NUM2 0x01
+#define IBUS_DEVICE_BMBT_BUTTON_NUM3 0x12
+#define IBUS_DEVICE_BMBT_BUTTON_NUM4 0x02
+#define IBUS_DEVICE_BMBT_BUTTON_NUM5 0x13
+#define IBUS_DEVICE_BMBT_BUTTON_NUM6 0x03
+#define IBUS_DEVICE_BMBT_BUTTON_TEL_PRESS 0x08
+#define IBUS_DEVICE_BMBT_BUTTON_TEL_HOLD 0x48
+#define IBUS_DEVICE_BMBT_BUTTON_TEL_RELEASE 0x88
+#define IBUS_DEVICE_BMBT_BUTTON_MENU_RELEASE 0xB4
 #define IBUS_DEVICE_BMBT_BUTTON_PWR_PRESS 0x06
 #define IBUS_DEVICE_BMBT_BUTTON_PWR_RELEASE 0x86
 #define IBUS_CMD_BMBT_BUTTON0 0x47
@@ -130,17 +148,24 @@
 #define IBUS_CMD_EWS_IMMOBILISER_STATUS 0x74
 
 #define IBUS_CMD_GM_DOORS_FLAPS_STATUS_RESP 0x7A
-#define IBUS_CMD_ZKE3_GM4_JOB_CENTRAL_LOCK 0x0B
-#define IBUS_CMD_ZKE3_GM4_JOB_LOCK_HIGH 0x40
-#define IBUS_CMD_ZKE3_GM4_JOB_LOCK_LOW 0x41
-#define IBUS_CMD_ZKE3_GM4_JOB_LOCK_ALL 0x88
-#define IBUS_CMD_ZKE3_GM6_JOB_LOCK_ALL 0x90
-#define IBUS_CMD_ZKE3_GM4_JOB_UNLOCK_HIGH 0x42
-#define IBUS_CMD_ZKE3_GM4_JOB_UNLOCK_LOW 0x43
+#define IBUS_CMD_GM_REMOTE_KEY_ENTRY 0x72
+#define IBUS_GM_REMOTE_KEY_UNLOCK 0x02
+#define IBUS_GM_REMOTE_KEY_LOCK 0x01
+#define IBUS_CMD_ZKE3_GM1_JOB_CENTRAL_LOCK 0x0B
+#define IBUS_CMD_ZKE3_GM5_JOB_CENTRAL_LOCK 0x14
+#define IBUS_CMD_ZKE3_GM5_JOB_LOCK_HIGH 0x40
+#define IBUS_CMD_ZKE3_GM5_JOB_LOCK_LOW 0x41
+#define IBUS_CMD_ZKE3_GM1_JOB_LOCK_ALL 0x88
+#define IBUS_CMD_ZKE3_GM5_JOB_LOCK_ALL 0x90
+#define IBUS_CMD_ZKE3_GM5_JOB_UNLOCK_HIGH 0x42
+#define IBUS_CMD_ZKE3_GM5_JOB_UNLOCK_LOW 0x43
+
 #define IBUS_CMD_ZKE5_JOB_CENTRAL_LOCK 0x03
-#define IBUS_CMD_ZKE5_JOB_LOCK_ALL 0x34
+#define IBUS_CMD_ZKE5_JOB_LOCK_ALL 0x4F
+#define IBUS_CMD_ZKE5_JOB_LOCK_DRIVER 0x47
 #define IBUS_CMD_ZKE5_JOB_UNLOCK_LOW 0x37
 #define IBUS_CMD_ZKE5_JOB_UNLOCK_ALL 0x45
+#define IBUS_CMD_ZKE5_JOB_UNLOCK_TRUNK 0x06
 
 #define IBUS_CMD_VOLUME_SET 0x32
 
@@ -154,7 +179,7 @@
 #define IBUS_CMD_GT_MENU_SELECT 0x31
 #define IBUS_CMD_GT_DISPLAY_RADIO_MENU 0x37
 #define IBUS_CMD_GT_SCREEN_MODE_SET 0x45
-#define IBUS_CMD_GT_RAD_TV_STATUS 0x4E
+#define IBUS_CMD_GT_RAD_AUDIO_INPUT 0x4E
 #define IBUS_CMD_GT_MONITOR_CONTROL 0x4F
 #define IBUS_CMD_GT_WRITE_INDEX 0x60
 #define IBUS_CMD_GT_WRITE_INDEX_TMC 0x61
@@ -181,11 +206,18 @@
 #define IBUS_CMD_IKE_CCM_WRITE_TEXT 0x1A
 
 #define IBUS_DATA_IKE_CCM_WRITE_CLEAR_TEXT 0x30
-#define IBUS_DATA_IKE_NUMERIC_CLEAR 0x20
-#define IBUS_DATA_IKE_NUMERIC_WRITE 0x23
+#define IBUS_DATA_IKE_CCM_WRITE_PERSIST_TEXT 0x36
 
-#define IBUS_CMD_LCM_REQ_REDUNDANT_DATA 0x53
-#define IBUS_CMD_LCM_RESP_REDUNDANT_DATA 0x54
+#define IBUS_DATA_IKE_NUMERIC_CLEAR 0x20
+#define IBUS_DATA_IKE_NUMERIC_X1_M 0x21
+#define IBUS_DATA_IKE_NUMERIC_X1 0x23
+#define IBUS_DATA_IKE_NUMERIC_X100_M 0x25
+#define IBUS_DATA_IKE_NUMERIC_X100 0x27
+#define IBUS_DATA_IKE_NUMERIC_X10_M 0x29
+#define IBUS_DATA_IKE_NUMERIC_X10 0x2B
+
+#define IBUS_CMD_REQ_REDUNDANT_DATA 0x53
+#define IBUS_CMD_RESP_REDUNDANT_DATA 0x54
 #define IBUS_CMD_LCM_BULB_IND_REQ 0x5A
 
 #define IBUS_CMD_MOD_STATUS_REQ 0x01
@@ -205,6 +237,7 @@
 #define IBUS_CMD_RAD_WRITE_MID_MENU 0x21
 
 #define IBUS_CMD_VOL_CTRL 0x32
+#define IBUS_CMD_RAD_PLAYBACK_CTRL 0x33
 
 #define IBUS_GT_DETECT_ERROR 0
 #define IBUS_GT_MKI 1
@@ -221,8 +254,8 @@
 #define IBUS_GT_TONE_MENU_OFF 0x08
 #define IBUS_GT_SEL_MENU_OFF 0x04
 #define IBUS_RAD_HIDE_BODY 0x0C
-#define IBUS_RAD_PRIORITY_GT 0x02
 #define IBUS_RAD_PRIORITY_RAD 0x01
+#define IBUS_RAD_PRIORITY_GT 0x02
 #define IBUS_GT_MONITOR_OFF 0x00
 #define IBUS_GT_MONITOR_AT_KL_R 0x10
 #define IBUS_DATA_GT_TELEMATICS_LOCALE 0x01
@@ -240,7 +273,10 @@
 
 #define IBUS_CMD_OBC_CONTROL 0x41
 
+#define IBUS_IKE_OBC_PROPERTY_TIME 0x01
+#define IBUS_IKE_OBC_PROPERTY_DATE 0x02
 #define IBUS_IKE_OBC_PROPERTY_TEMPERATURE 0x03
+#define IBUS_IKE_OBC_PROPERTY_RANGE 0x06
 #define IBUS_IKE_OBC_PROPERTY_REQUEST_TEXT 0x01
 
 #define IBUS_LCM_LIGHT_STATUS_REQ 0x5A
@@ -260,6 +296,12 @@
 #define IBUS_LM_BLINKER_OFF 0
 #define IBUS_LM_BLINKER_LEFT 1
 #define IBUS_LM_BLINKER_RIGHT 2
+#define IBUS_LM_PARK_LIGHTS_OFF 0
+#define IBUS_LM_PARK_LIGHTS_FRONT 1
+#define IBUS_LM_PARK_LIGHTS_FRONT_AND_REAR 2
+#define IBUS_LM_HOME_OFF 0
+#define IBUS_LM_HOME_WELCOME 1
+#define IBUS_LM_HOME_FOLLOW 2
 
 #define IBUS_LM_BULB_OFF 0x00
 
@@ -270,24 +312,39 @@
 // Side Marker Left = Byte 2, Side Marker Right = Byte 3
 #define IBUS_LME38_SIDE_MARKER_LEFT 0x02
 #define IBUS_LME38_SIDE_MARKER_RIGHT 0x40
+// High Beam Left + Right = Byte 4, Tail Lamp Left = Byte 3, Tail Lamp Right = Byte 2
+#define IBUS_LME38_HIGH_BEAM_L 0x01
+#define IBUS_LME38_HIGH_BEAM_R 0x02
+#define IBUS_LME38_TAIL_LAMP_L 0x20
+#define IBUS_LME38_TAIL_LAMP_R 0x04
 
 // LCM, LCM_A
 // Different bytes! Update the blinker msg if alternating.
 // Byte 0 (S2_BLK_L switch No.2 left turn / S2_BLK_R switch No.2 right turn)
-// #define IBUS_LCM_BLINKER_LEFT 0x80 
+// #define IBUS_LCM_BLINKER_LEFT 0x80
 // #define IBUS_LCM_BLINKER_RIGHT 0x40
 // Byte 1 (S2_BLK_L switch No.1 left turn / S2_BLK_R switch No.1 right turn)
 #define IBUS_LCM_BLINKER_OFF 0x00
 #define IBUS_LCM_BLINKER_LEFT 0x01
-#define IBUS_LCM_BLINKER_RIGHT 0x0
+#define IBUS_LCM_BLINKER_RIGHT 0x02
 // Side Marker Left = Byte 5, Side Marker Right = Byte 6
 #define IBUS_LCM_SIDE_MARKER_LEFT 0x01
 #define IBUS_LCM_SIDE_MARKER_RIGHT 0x20
+// High Beam Left + Right = Byte 5, Tail Lamp Left = Byte 6, Tail Lamp Right = Byte 7
+#define IBUS_LCM_HIGH_BEAM_L 0x10
+#define IBUS_LCM_HIGH_BEAM_R 0x20
+#define IBUS_LCM_TAIL_LAMP_L 0x08
+#define IBUS_LCM_TAIL_LAMP_R 0x10
 
 // LCM_II, LCM_III, LCM_IV (Byte 2)
 #define IBUS_LCM_II_BLINKER_OFF 0x00
 #define IBUS_LCM_II_BLINKER_LEFT 0x80
 #define IBUS_LCM_II_BLINKER_RIGHT 0x40
+// High Beam Left + Right = Byte 5, Tail Lamp Left = Byte 6, Tail Lamp Right = Byte 7
+#define IBUS_LCM_II_HIGH_BEAM_L 0x10
+#define IBUS_LCM_II_HIGH_BEAM_R 0x20
+#define IBUS_LCM_II_TAIL_LAMP_L 0x08
+#define IBUS_LCM_II_TAIL_LAMP_R 0x10
 
 // LSZ, LSZ_2 (Headlight Status = Byte 2, Blinker Status = Byte 3)
 #define IBUS_LSZ_HEADLIGHT_OFF 0xFF
@@ -298,6 +355,11 @@
 // Front Side Marker Left = Byte 5, Front Side Marker Right = Byte 4
 #define IBUS_LSZ_SIDE_MARKER_LEFT 0x08
 #define IBUS_LSZ_SIDE_MARKER_RIGHT 0x02
+// High Beam Left + Right = Byte 5, Tail Lamp Left = Byte 5, Tail Lamp Right = Byte 6
+#define IBUS_LSZ_HIGH_BEAM_L 0x10
+#define IBUS_LSZ_HIGH_BEAM_R 0x20
+#define IBUS_LSZ_TAIL_LAMP_L 0x40
+#define IBUS_LSZ_TAIL_LAMP_R 0x08
 
 // Ident (0x00) parameter offsets
 #define IBUS_LM_CI_ID_OFFSET 9
@@ -308,7 +370,11 @@
 #define IBUS_LM_IO_LOAD_REAR_OFFSET 20
 #define IBUS_LM_IO_PHOTO_OFFSET 22
 // LME38 has unique mapping
-#define IBUS_LME38_IO_DIMMER_OFFSET 22
+#define IBUS_LME38_IO_BATTERY_VOLTAGE_OFFSET 10
+#define IBUS_LME38_IO_DIMMER_OFFSET 23
+
+#define IBUS_LM_BATTERY_SCALE_DEFAULT 136
+#define IBUS_LM_BATTERY_SCALE_E46_E8X 132
 
 // Light Module variants
 #define IBUS_LM_LME38 1
@@ -319,20 +385,23 @@
 #define IBUS_LM_LCM_IV 6
 #define IBUS_LM_LSZ 7
 #define IBUS_LM_LSZ_2 8
+#define IBUS_LM_ZKEBC1 9
+#define IBUS_LM_ZKEBC1RD 10
+#define IBUS_LM_LM2_83 11
 
-#define IBusMIDSymbolNext 0xC9
-#define IBusMIDSymbolBack 0xCA
+#define IBUS_MID_SYMBOL_NEXT 0xC9
+#define IBUS_MID_SYMBOL_BACK 0xCA
 
-#define IBus_MID_MAX_CHARS 24
-#define IBus_MID_TITLE_MAX_CHARS 11
-#define IBus_MID_MENU_MAX_CHARS 4
-#define IBus_MID_CMD_MODE 0x20
+#define IBUS_MID_MAX_CHARS 24
+#define IBUS_MID_TITLE_MAX_CHARS 11
+#define IBUS_MID_MENU_MAX_CHARS 4
+#define IBUS_MID_CMD_MODE 0x20
 #define IBUS_MID_CMD_SET_MODE 0x27
 #define IBUS_MID_MODE_REQUEST_TYPE_PHYSICAL 0x02
 #define IBUS_MID_MODE_REQUEST_TYPE_SELF 0x00
-#define IBus_MID_Button_Press 0x31
-#define IBus_MID_BTN_TEL_RIGHT_RELEASE 0x4D
-#define IBus_MID_BTN_TEL_LEFT_RELEASE 0x4C
+#define IBUS_MID_BUTTON_PRESS 0x31
+#define IBUS_MID_BTN_TEL_RIGHT_RELEASE 0x4D
+#define IBUS_MID_BTN_TEL_LEFT_RELEASE 0x4C
 
 #define IBUS_MID_UI_TEL_OPEN 0x8E
 #define IBUS_MID_UI_TEL_CLOSE 0x8F
@@ -342,17 +411,113 @@
 
 #define IBUS_TEL_CMD_LED_STATUS 0x2B
 #define IBUS_TEL_CMD_STATUS 0x2C
-#define IBUS_TEL_CMD_MAIN_MENU 0x21
-#define IBUS_TEL_CMD_NUMBER 0x23
 #define IBUS_TEL_STATUS_NONE 0x00
 #define IBUS_TEL_STATUS_ACTIVE_POWER_HANDSFREE 0x10
 #define IBUS_TEL_STATUS_ACTIVE_POWER_CALL_HANDSFREE 0x35
-#define IBUS_TEL_LED_STATUS_RED 0x01
-#define IBUS_TEL_LED_STATUS_RED_BLINKING 0x03
-#define IBUS_TEL_LED_STATUS_GREEN 0x10
 #define IBUS_TEL_SIG_EVEREST 0x38
 
+// Telephone Special Characters
+#define IBUS_TEL_CHAR_FIELD_DELIMITER 0x06
+#define IBUS_TEL_CHAR_FLASH_PREFIX 0x01
+#define IBUS_TEL_CHAR_HANDSFREE_ICON 0xC6
+#define IBUS_TEL_CHAR_ON_CALL_LEFT 0xC7
+#define IBUS_TEL_CHAR_ON_CALL_RIGHT 0xC8
+
+// Telephone Commands
+#define IBUS_TEL_CMD_BODY_TEXT 0xA5
+#define IBUS_TEL_CMD_MENU_TEXT 0x21
+#define IBUS_TEL_CMD_PROPERTY_TEXT 0x24
+#define IBUS_TEL_CMD_SMS_ICON 0xA6
+#define IBUS_TEL_CMD_TITLE_TEXT 0x23
+
+// Telephone Detail Layout Indices
+#define IBUS_TEL_DETAIL_BTN_BACK 0x50
+#define IBUS_TEL_DETAIL_BTN_CENTER 0x53
+#define IBUS_TEL_DETAIL_BTN_LEFT 0x51
+#define IBUS_TEL_DETAIL_BTN_RIGHT 0x52
+#define IBUS_TEL_DETAIL_GREYED_LINE 0x60
+#define IBUS_TEL_DETAIL_LINE_0 0x40
+#define IBUS_TEL_DETAIL_LINE_1 0x41
+#define IBUS_TEL_DETAIL_LINE_2 0x42
+#define IBUS_TEL_DETAIL_LINE_3 0x43
+#define IBUS_TEL_DETAIL_LINE_4 0x44
+#define IBUS_TEL_DETAIL_LINE_5 0x45
+
+// Telephone Function Types (for 0x31 input reports)
+#define IBUS_TEL_FUNC_CONTACT 0x01
+#define IBUS_TEL_FUNC_DIGIT 0x02
+#define IBUS_TEL_FUNC_INFO 0x08
+#define IBUS_TEL_FUNC_NAVIGATION 0x07
+#define IBUS_TEL_FUNC_NULL 0x00
+#define IBUS_TEL_FUNC_SOS 0x05
+
+// Telephone Layout Types
+#define IBUS_TEL_LAYOUT_DETAIL 0xF1
+#define IBUS_TEL_LAYOUT_DIAL 0x42
+#define IBUS_TEL_LAYOUT_DIRECTORY 0x43
+#define IBUS_TEL_LAYOUT_LIST 0xF0
+#define IBUS_TEL_LAYOUT_TOP_8 0x80
+
+// Telephone LED Bitfield (0x2B)
+#define IBUS_TEL_LED_OFF 0x00
+#define IBUS_TEL_LED_GREEN_BLINK 0x30
+#define IBUS_TEL_LED_GREEN_ON 0x10
+#define IBUS_TEL_LED_RED_BLINK 0x03
+#define IBUS_TEL_LED_RED_ON 0x01
+#define IBUS_TEL_LED_YELLOW_BLINK 0x0C
+#define IBUS_TEL_LED_YELLOW_ON 0x04
+
+// Telephone Options Bitfield
+#define IBUS_TEL_OPT_BUFFER 0x40
+#define IBUS_TEL_OPT_CLEAR 0x20
+#define IBUS_TEL_OPT_HIGHLIGHT 0x80
+#define IBUS_TEL_OPT_INDEX_MASK 0x1F
+
+// Telephone Property Layout Types
+#define IBUS_TEL_PROP_CALL_COST_CURRENT 0x93
+#define IBUS_TEL_PROP_CALL_COST_TOTAL 0x94
+#define IBUS_TEL_PROP_CALL_TIME_MINUTES 0x96
+#define IBUS_TEL_PROP_CALL_TIME_SECONDS 0x97
+#define IBUS_TEL_PROP_SIGNAL_STRENGTH 0x91
+
+// Telephone Signal Strength Bar Characters
+#define IBUS_TEL_SIGNAL_BAR_0 0xB2
+#define IBUS_TEL_SIGNAL_BAR_1 0xB3
+#define IBUS_TEL_SIGNAL_BAR_2 0xB4
+#define IBUS_TEL_SIGNAL_BAR_3 0xB5
+#define IBUS_TEL_SIGNAL_BAR_4 0xB6
+#define IBUS_TEL_SIGNAL_BAR_5 0xB7
+#define IBUS_TEL_SIGNAL_BAR_FULL 0xB8
+
+// Telephone Status Bitfield (0x2C)
+#define IBUS_TEL_STATUS_ESTABLISHING_CALL 0x04
+#define IBUS_TEL_STATUS_HANDSFREE 0x01
+#define IBUS_TEL_STATUS_ON_CALL 0x20
+#define IBUS_TEL_STATUS_POWER 0x10
+
+// Telephone Title Layout Types
+#define IBUS_TEL_TITLE_DEFAULT 0x00
+#define IBUS_TEL_TITLE_DIAL_CLEAR 0x61
+#define IBUS_TEL_TITLE_DIAL_NUMBER 0x63
+#define IBUS_TEL_TITLE_DIR_NAME 0x52
+#define IBUS_TEL_TITLE_DIR_NUMBER 0x53
+#define IBUS_TEL_TITLE_ON_CALL 0x01
+#define IBUS_TEL_TITLE_ON_CALL_HFS 0x02
+#define IBUS_TEL_TITLE_PIN_DIGITS 0x05
+#define IBUS_TEL_TITLE_SOS 0xC0
+#define IBUS_TEL_TITLE_TOP_8_CLEAR 0x80
+#define IBUS_TEL_TITLE_TOP_8_NAME 0x81
+#define IBUS_TEL_TITLE_TOP_8_NUMBER 0x82
+
+// Telephone Title Options
+#define IBUS_TEL_TITLE_OPT_SET 0x30
+#define IBUS_TEL_TITLE_OPT_UPDATE 0x20
+
+#define IBUS_BLUEBUS_CARPHONICS_EXTERNAL_CONTROL 0xBC
 #define IBUS_BLUEBUS_CMD_SET_STATUS 0xBB
+
+#define IBUS_BLUEBUS_CARPHONICS_DISABLE 0
+#define IBUS_BLUEBUS_CARPHONICS_ENABLE 1
 
 #define IBUS_BLUEBUS_SUBCMD_SET_STATUS_TEL 0x01
 
@@ -376,21 +541,29 @@
 #define IBUS_SENSOR_VALUE_TEMP_UNIT 0x04
 #define IBUS_SENSOR_VALUE_GEAR_POS 0x05
 #define IBUS_SENSOR_VALUE_AMBIENT_TEMP_CALCULATED 0x06
+#define IBUS_SENSOR_VALUE_VEHICLE_RANGE 0x07
+#define IBUS_SENSOR_VALUE_BATTERY_VOLTAGE 0x08
+
+#define IBUS_AMBIENT_TEMP_MIN -40
+#define IBUS_TEMP_UNSET -128 // 0x80
 
 #define IBUS_SES_ZOOM_LEVELS 8
+#define IBUS_SES_CMD_NAV_CTRL 0xAA
+#define IBUS_SES_DATA_NAV_CTRL_SHOWMAP 0x04
+#define IBUS_SES_DATA_NAV_CTRL_SILENCE 0x06
+#define IBUS_SES_DATA_NAV_CTRL_SETZOOM 0x10
+#define IBUS_SES_DATA_NAV_CTRL_ROUTEFUEL 0x20
 
 #define IBUS_MFL_CMD_BTN_PRESS 0x3B
 #define IBUS_MFL_BTN_EVENT_NEXT_REL 0x21
 #define IBUS_MFL_BTN_EVENT_PREV_REL 0x28
-#define IBUS_MFL_BTN_EVENT_RT_PRESS 0x40
-#define IBUS_MFL_BTN_EVENT_RT_REL 0x00
 #define IBUS_MFL_BTN_EVENT_VOICE_PRESS 0x80
 #define IBUS_MFL_BTN_EVENT_VOICE_HOLD 0x90
 #define IBUS_MFL_BTN_EVENT_VOICE_REL 0xA0
 
 #define IBUS_MFL_CMD_VOL_PRESS 0x32
-#define IBUS_MFL_BTN_VOL_UP 0x11
-#define IBUS_MFL_BTN_VOL_DOWN 0x10
+
+#define IBUS_NAV_CMD_GPSTIME 0x1F
 
 #define IBUS_VEHICLE_TYPE_E38_E39_E52_E53 0x01
 #define IBUS_VEHICLE_TYPE_E46 0x02
@@ -420,69 +593,85 @@
 #define IBUS_GM_ZKE5_S12 7
 #define IBUS_GM_ZKEBC1 8
 #define IBUS_GM_ZKEBC1RD 9
+#define IBUS_GM_IDENT_ERR 10
 
 #define IBUS_TCU_SINGLE_LINE_UI_MAX_LEN 11
 #define IBUS_TELEMATICS_COORDS_LEN 18
 #define IBUS_TELEMATICS_LOCATION_LEN 31
 
 // Events
-#define IBUS_EVENT_GTDIAIdentityResponse 32
-#define IBUS_EVENT_CDPoll 33
-#define IBUS_EVENT_CDStatusRequest 34
-#define IBUS_EVENT_CDClearDisplay 35
-#define IBUS_EVENT_IKEIgnitionStatus 36
-#define IBUS_EVENT_BMBTButton 37
-#define IBUS_EVENT_GTMenuSelect 38
-#define IBUS_EVENT_ScreenModeUpdate 39
-#define IBUS_EVENT_RAD_WRITE_DISPLAY 40
-#define IBUS_EVENT_ScreenModeSet 41
-#define IBUS_EVENT_RADDiagResponse 42
-#define IBUS_EVENT_MFLButton 43
-#define IBUS_EVENT_RADDisplayMenu 44
-#define IBUS_EVENT_RADMIDDisplayText 45
-#define IBUS_EVENT_RADMIDDisplayMenu 46
-#define IBUS_EVENT_LCMLightStatus 47
-#define IBUS_EVENT_LCMDimmerStatus 48
-#define IBUS_EVENT_GTWriteResponse 49
-#define IBUS_EVENT_MFLVolumeChange 50
-#define IBUS_EVENT_MIDButtonPress 51
-#define IBUS_EVENT_MIDModeChange 52
-#define IBUS_EVENT_MODULE_STATUS_RESP 54
-#define IBUS_EVENT_IKE_VEHICLE_CONFIG 55
-#define IBUS_EVENT_LCMRedundantData 56
-#define IBUS_EVENT_FirstMessageReceived 57
-#define IBUS_EVENT_GTDIAOSIdentityResponse 58
-#define IBUS_EVENT_IKESpeedRPMUpdate 59
-#define IBUS_EVENT_ModuleStatusRequest 60
-#define IBUS_EVENT_GTChangeUIRequest 61
-#define IBUS_EVENT_DoorsFlapsStatusResponse 62
-#define IBUS_EVENT_LCMDiagnosticsAcknowledge 63
-#define IBUS_EVENT_DSPConfigSet 64
-#define IBUS_EVENT_TELVolumeChange 65
-#define IBUS_EVENT_RADVolumeChange 66
-#define IBUS_EVENT_LMIdentResponse 67
-#define IBUS_EVENT_TV_STATUS 68
-#define IBUS_EVENT_PDC_STATUS 69
-#define IBUS_EVENT_PDC_SENSOR_UPDATE 70
-#define IBUS_EVENT_SENSOR_VALUE_UPDATE 71
-#define IBUS_EVENT_SCREEN_BUFFER_FLUSH 72
-#define IBUS_EVENT_GT_TELEMATICS_DATA 73
-#define IBUS_EVENT_BLUEBUS_TEL_STATUS_UPDATE 74
-#define IBUS_EVENT_VM_IDENT_RESP 75
-#define IBUS_EVENT_GT_MENU_BUFFER_UPDATE 76
-#define IBUS_EVENT_RAD_MESSAGE_RCV 77
+#define IBUS_EVENT_GT_DIA_IDENTITY_RESPONSE 32
+#define IBUS_EVENT_CD_STATUS_REQUEST 33
+#define IBUS_EVENT_CD_CLEAR_DISPLAY 34
+#define IBUS_EVENT_IKE_IGNITION_STATUS 35
+#define IBUS_EVENT_BMBT_BUTTON 36
+#define IBUS_EVENT_GT_MENU_SELECT 37
+#define IBUS_EVENT_SCREEN_MODE_UPDATE 38
+#define IBUS_EVENT_RAD_WRITE_DISPLAY 39
+#define IBUS_EVENT_SCREEN_MODE_SET 40
+#define IBUS_EVENT_MFL_BUTTON 41
+#define IBUS_EVENT_RAD_DISPLAY_MENU 42
+#define IBUS_EVENT_RAD_MID_DISPLAY_TEXT 43
+#define IBUS_EVENT_RAD_MID_DISPLAY_MENU 44
+#define IBUS_EVENT_LCM_LIGHT_STATUS 45
+#define IBUS_EVENT_LCM_DIMMER_STATUS 46
+#define IBUS_EVENT_MFL_VOLUME_CHANGE 47
+#define IBUS_EVENT_MID_BUTTON_PRESS 48
+#define IBUS_EVENT_MID_MODE_CHANGE 49
+#define IBUS_EVENT_MODULE_STATUS_RESP 50
+#define IBUS_EVENT_IKE_VEHICLE_CONFIG 51
+#define IBUS_EVENT_REDUNDANT_DATA 52
+#define IBUS_EVENT_FIRST_MESSAGE_RECEIVED 53
+#define IBUS_EVENT_GT_DIA_OS_IDENTITY_RESPONSE 54
+#define IBUS_EVENT_IKE_SPEED_RPM_UPDATE 55
+#define IBUS_EVENT_MODULE_STATUS_REQUEST 56
+#define IBUS_EVENT_GT_CHANGE_UI_REQUEST 57
+#define IBUS_EVENT_DOORS_FLAPS_STATUS_RESPONSE 58
+#define IBUS_EVENT_LCM_DIAGNOSTICS_ACKNOWLEDGE 59
+#define IBUS_EVENT_DSP_CONFIG_SET 60
+#define IBUS_EVENT_TEL_VOLUME_CHANGE 61
+#define IBUS_EVENT_RAD_VOLUME_CHANGE 62
+#define IBUS_EVENT_LM_IDENT_RESPONSE 63
+#define IBUS_EVENT_GT_AUDIO_INPUT_CONTROL 64
+#define IBUS_EVENT_PDC_STATUS 65
+#define IBUS_EVENT_PDC_SENSOR_UPDATE 66
+#define IBUS_EVENT_SENSOR_VALUE_UPDATE 67
+#define IBUS_EVENT_GT_SCREEN_BUFFER_FLUSH 68
+#define IBUS_EVENT_GT_TELEMATICS_DATA 69
+#define IBUS_EVENT_BLUEBUS_TEL_STATUS_UPDATE 70
+#define IBUS_EVENT_VM_IDENT_RESP 71
+#define IBUS_EVENT_GT_MENU_BUFFER_UPDATE 72
+#define IBUS_EVENT_RAD_MESSAGE_RCV 73
+#define IBUS_EVENT_MONITOR_STATUS 74
+#define IBUS_EVENT_GM_IDENT_RESP 75
+#define IBUS_EVENT_NAV_GPSDATETIME_UPDATE 76
+#define IBUS_EVENT_RANGE_UPDATE 77
+#define IBUS_EVENT_GT_SCREEN_MODE_SET 78
+#define IBUS_EVENT_RAD_PLAYBACK_CTRL 79
+#define IBUS_EVENT_GT_SCREEN_BUFFER_WRITE 80
+#define IBUS_EVENT_ZKE_DIAG_ACK 81
+#define IBUS_EVENT_GM_REMOTE_KEY_ENTRY 82
 
 // Configuration and protocol definitions
-#define IBUS_MAX_MSG_LENGTH 47 // Src Len Dest Cmd Data[42 Byte Max] XOR
+// Src Len Dest Cmd Data[42 Byte Max] XOR
+#define IBUS_MAX_MSG_LENGTH 47
 #define IBUS_RAD_MAIN_AREA_WATERMARK 0x10
-#define IBUS_RX_BUFFER_SIZE 255 // 8-bit Max
-#define IBUS_TX_BUFFER_SIZE 16
-#define IBUS_RX_BUFFER_TIMEOUT 70 // At 9600 baud, we transmit ~1.5 byte/ms
-#define IBUS_TX_BUFFER_WAIT 7 // If we transmit faster, other modules may not hear us
+#define IBUS_RX_BUFFER_SIZE 255
+#define IBUS_TX_BUFFER_SIZE 32
+// 9600 baud = ~1.1 = 1.5 bytes/ms - IBUS_MAX_MSG_LENGTH * 2
+#define IBUS_RX_BUFFER_TIMEOUT 71
+// This is the time we wait before transmitting. Any faster than this, and the
+// MKIII v20 based GT will miss frames
+#define IBUS_TX_FRAME_IDLE_WAIT 8
 #define IBUS_TX_TIMEOUT_OFF 0
 #define IBUS_TX_TIMEOUT_ON 1
 #define IBUS_TX_TIMEOUT_DATA_SENT 2
-#define IBUS_TX_TIMEOUT_WAIT 250
+// We should wait at least one full frame period
+#define IBUS_TX_TIMEOUT_WAIT (IBUS_RX_BUFFER_TIMEOUT + IBUS_TX_FRAME_IDLE_WAIT)
+#define IBUS_TX_MAX_RETRIES 3
+// Larger TX bursts could trigger this errantly. We wait 10 frame periods before
+// assuming it is lost. 10 is the max number of frames we generally transmit
+#define IBUS_TX_LOOPBACK_TIMEOUT (IBUS_TX_TIMEOUT_WAIT * 10)
 
 /**
  * IBusModuleStatus_t
@@ -499,16 +688,20 @@ typedef struct IBusModuleStatus_t {
     uint8_t MID: 1;
     uint8_t NAV: 1;
     uint8_t RAD: 1;
+    uint8_t IRIS: 1;
     uint8_t VM: 1;
     uint8_t PDC: 1;
+    uint8_t GM: 1;
 } IBusModuleStatus_t;
 
 /**
- * IBusPDCSensorStatus_t
+ * IBUSPDCStatus_t
  *     Description:
  *         This object tracks the PDC distances given by each sensor
  */
-typedef struct IBusPDCSensorStatus_t {
+typedef struct IBUSPDCStatus_t {
+    uint8_t status: 1;
+    uint8_t isUpdated: 1;
     uint8_t frontLeft;
     uint8_t frontCenterLeft;
     uint8_t frontCenterRight;
@@ -517,7 +710,17 @@ typedef struct IBusPDCSensorStatus_t {
     uint8_t rearCenterLeft;
     uint8_t rearCenterRight;
     uint8_t rearRight;
-} IBusPDCSensorStatus_t;
+    uint8_t checksum;
+} IBUSPDCStatus_t;
+
+typedef struct IBusDateTime_t {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t min;
+    uint8_t sec;
+} IBusDateTime_t;
 
 /**
  * IBus_t
@@ -533,9 +736,10 @@ typedef struct IBus_t {
     uint8_t txBufferReadbackIdx;
     uint8_t txBufferReadIdx;
     uint8_t txBufferWriteIdx;
+    uint8_t txRetries: 2;
     uint32_t rxLastStamp;
     uint32_t txLastStamp;
-    signed char ambientTemperature;
+    int8_t ambientTemperature;
     char ambientTemperatureCalculated[7];
     uint8_t coolantTemperature;
     uint8_t cdChangerFunction;
@@ -548,9 +752,14 @@ typedef struct IBus_t {
     uint8_t lmPhotoVoltage;
     uint8_t lmVariant;
     uint8_t oilTemperature;
+    uint8_t batteryVoltage;
     uint8_t vehicleType;
+    uint16_t vehicleRange;
+    uint8_t videoSource: 2;
     IBusModuleStatus_t moduleStatus;
-    IBusPDCSensorStatus_t pdcSensors;
+    IBUSPDCStatus_t pdc;
+    IBusDateTime_t obcDateTime;
+    IBusDateTime_t gpsDateTime;
     char telematicsLocale[IBUS_TELEMATICS_LOCATION_LEN];
     char telematicsStreet[IBUS_TELEMATICS_LOCATION_LEN];
     char telematicsLatitude[IBUS_TELEMATICS_COORDS_LEN];
@@ -561,6 +770,8 @@ IBus_t IBusInit();
 void IBusProcess(IBus_t *);
 void IBusSendCommand(IBus_t *, const uint8_t, const uint8_t, const uint8_t *, const size_t);
 void IBusSetInternalIgnitionStatus(IBus_t *, uint8_t);
+uint32_t IBusGetDateTimeAsEpoch(IBusDateTime_t *);
+IBusDateTime_t IBusGetEpochAsDateTime(uint32_t);
 uint8_t IBusGetLMCodingIndex(uint8_t *);
 uint8_t IBusGetLMDiagnosticIndex(uint8_t *);
 uint8_t IBusGetLMDimmerChecksum(uint8_t *);
@@ -578,6 +789,7 @@ void IBusCommandCDCAnnounce(IBus_t *);
 void IBusCommandCDCStatus(IBus_t *, uint8_t, uint8_t, uint8_t, uint8_t);
 void IBusCommandDIAGetCodingData(IBus_t *, uint8_t, uint8_t, uint8_t);
 void IBusCommandDIAGetIdentity(IBus_t *, uint8_t);
+void IBusCommandDIAGetIdentityPage(IBus_t *, uint8_t, uint8_t);
 void IBusCommandDIAGetIOStatus(IBus_t *, uint8_t);
 void IBusCommandDIAGetOSIdentity(IBus_t *, uint8_t);
 void IBusCommandDIATerminateDiag(IBus_t *, uint8_t);
@@ -591,6 +803,7 @@ void IBusCommandGMDoorLockHigh(IBus_t *);
 void IBusCommandGMDoorLockLow(IBus_t *);
 void IBusCommandGMDoorUnlockAll(IBus_t *);
 void IBusCommandGMDoorLockAll(IBus_t *);
+void IBusCommandGMDoorLockDriver(IBus_t *);
 void IBusCommandGTBMBTControl(IBus_t *, uint8_t);
 void IBusCommandGTUpdate(IBus_t *, uint8_t);
 void IBusCommandGTWriteBusinessNavTitle(IBus_t *, char *);
@@ -614,9 +827,9 @@ void IBusCommandTELIKEDisplayWrite(IBus_t *, char *);
 void IBusCommandTELIKEDisplayClear(IBus_t *);
 void IBusCommandIKECheckControlDisplayWrite(IBus_t *, char *);
 void IBusCommandIKECheckControlDisplayClear(IBus_t *);
-void IBusCommandIKENumbericDisplayWrite(IBus_t *, uint8_t);
+void IBusCommandIKENumbericDisplayWrite(IBus_t *, uint8_t, uint8_t);
 void IBusCommandIKENumbericDisplayClear(IBus_t *);
-void IBusCommandLMActivateBulbs(IBus_t *, uint8_t, uint8_t);
+void IBusCommandLMActivateBulbs(IBus_t *, uint8_t, uint8_t, uint8_t);
 void IBusCommandLMGetClusterIndicators(IBus_t *);
 void IBusCommandLMGetRedundantData(IBus_t *);
 void IBusCommandMIDButtonPress(IBus_t *, uint8_t, uint8_t);
@@ -633,10 +846,22 @@ void IBusCommandRADDisableMenu(IBus_t *);
 void IBusCommandRADEnableMenu(IBus_t *);
 void IBusCommandRADExitMenu(IBus_t *);
 void IBusCommandSESSetMapZoom(IBus_t *, uint8_t);
+void IBusCommandSESShowMap(IBus_t *);
+void IBusCommandSESRouteFuel(IBus_t *);
+void IBusCommandSESSilentNavigation(IBus_t *);
 void IBusCommandSetVolume(IBus_t *, uint8_t, uint8_t, uint8_t);
-void IBusCommandTELSetGTDisplayMenu(IBus_t *);
-void IBusCommandTELSetGTDisplayNumber(IBus_t *, char *);
-void IBusCommandTELSetLED(IBus_t *, uint8_t);
+void IBusCommandTELBodyText(IBus_t *, uint8_t, uint8_t, uint8_t, uint8_t, char *);
+void IBusCommandTELCallTime(IBus_t *, uint8_t, uint8_t, uint8_t);
+void IBusCommandTELHandsfreeIndicator(IBus_t *, uint8_t);
+void IBusCommandTELLED(IBus_t *, uint8_t);
+void IBusCommandTELMenuText(IBus_t *, uint8_t, uint8_t, uint8_t, uint8_t, char *);
+void IBusCommandTELOnCallIndicator(IBus_t *, uint8_t);
+void IBusCommandTELPropertyText(IBus_t *, uint8_t, uint8_t, char *);
+void IBusCommandTELSignalStrength(IBus_t *, uint8_t, uint8_t);
+void IBusCommandTELSMSIcon(IBus_t *, uint8_t);
 void IBusCommandTELStatus(IBus_t *, uint8_t);
 void IBusCommandTELStatusText(IBus_t *, char *, uint8_t);
+void IBusCommandTELTitleText(IBus_t *, uint8_t, uint8_t, uint8_t, char *);
+void IBusCommandGMDoorUnlockTrunk(IBus_t *);
+void IBusCommandVMModeSet(IBus_t *, uint8_t);
 #endif /* IBUS_H */

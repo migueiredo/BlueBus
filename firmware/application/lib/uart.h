@@ -9,16 +9,13 @@
 #include <stdint.h>
 #include <xc.h>
 #include "char_queue.h"
-#include "log.h"
-#include "sfr_setters.h"
-#include "timer.h"
-#include "utils.h"
 #define UART_BAUD_115200 34
 #define UART_BAUD_9600 103
 #define UART_ERR_GERR 0x1
 #define UART_ERR_OERR 0x2
 #define UART_ERR_FERR 0x4
 #define UART_ERR_PERR 0x8
+#define UART_ERR_FLAGS_STR_SIZE 24
 #define UART_MODULES_COUNT 4
 #define UART_PARITY_NONE 0
 #define UART_PARITY_EVEN 1

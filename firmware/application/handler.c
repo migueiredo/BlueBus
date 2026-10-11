@@ -5,6 +5,18 @@
  *     Implement the logic to have the BC127 and IBus communicate
  */
 #include "handler.h"
+#include <string.h>
+#include "handler/handler_bt.h"
+#include "handler/handler_ibus.h"
+#include "lib/bt/bt_common.h"
+#include "lib/bt.h"
+#include "lib/config.h"
+#include "lib/event.h"
+#include "lib/timer.h"
+#include "ui/bmbt.h"
+#include "ui/cd53.h"
+#include "ui/mid.h"
+
 static HandlerContext_t Context;
 
 /**
@@ -25,7 +37,7 @@ void HandlerInit(BT_t *bt, IBus_t *ibus)
     uint32_t now = TimerGetMillis();
     Context.btDeviceConnRetries = 0;
     Context.btStartupIsRun = 0;
-    Context.btSelectedDevice = HANDLER_BT_SELECTED_DEVICE_NONE;
+    Context.btSelectedDevice = 0;
     Context.volumeMode = HANDLER_VOLUME_MODE_NORMAL;
     Context.gtStatus = HANDLER_GT_STATUS_UNCHECKED;
     Context.monitorStatus = HANDLER_MONITOR_STATUS_UNSET;
@@ -34,6 +46,9 @@ void HandlerInit(BT_t *bt, IBus_t *ibus)
     Context.lmDimmerChecksum = 0x00;
     Context.mflButtonStatus = HANDLER_MFL_STATUS_OFF;
     Context.telStatus = IBUS_TEL_STATUS_NONE;
+    Context.telOnStatus = HANDLER_TEL_OFF;
+    Context.telMode = HANDLER_TEL_MODE_AUDIO;
+    Context.telVolSteps = 0;
     Context.btBootState = HANDLER_BT_BOOT_OK;
     memset(&Context.gmState, 0, sizeof(HandlerBodyModuleStatus_t));
     memset(&Context.lmState, 0, sizeof(HandlerLightControlStatus_t));
@@ -42,16 +57,16 @@ void HandlerInit(BT_t *bt, IBus_t *ibus)
     Context.lmLastIOStatus = 0;
     Context.cdChangerLastPoll = now;
     Context.cdChangerLastStatus = now;
-    Context.pdcLastStatus = 0;
+    Context.pdcActive = 0;
     Context.lmLastStatusSet = 0;
     Context.radLastMessage = TimerGetMillis();
     EventRegisterCallback(
-        UIEvent_CloseConnection,
+        UI_EVENT_CLOSE_CONNECTION,
         &HandlerUICloseConnection,
         &Context
     );
     EventRegisterCallback(
-        UIEvent_InitiateConnection,
+        UI_EVENT_INITIATE_CONNECTION,
         &HandlerUIInitiateConnection,
         &Context
     );
@@ -63,7 +78,8 @@ void HandlerInit(BT_t *bt, IBus_t *ibus)
     HandlerBTInit(&Context);
     HandlerIBusInit(&Context);
     if (Context.uiMode == CONFIG_UI_CD53 ||
-        Context.uiMode == CONFIG_UI_MIR
+        Context.uiMode == CONFIG_UI_MIR ||
+        Context.uiMode == CONFIG_UI_IRIS
     ) {
         CD53Init(bt, ibus);
     } else if (Context.uiMode == CONFIG_UI_BMBT) {
@@ -89,6 +105,7 @@ void HandlerInit(BT_t *bt, IBus_t *ibus)
 void HandlerUICloseConnection(void *ctx, unsigned char *data)
 {
     HandlerContext_t *context = (HandlerContext_t *) ctx;
+    context->btSelectedDevice = HANDLER_BT_SELECTED_DEVICE_NONE;
     // Reset the metadata so we don't display the wrong data
     BTClearMetadata(context->bt);
     // Clear the actively paired device
@@ -101,6 +118,8 @@ void HandlerUICloseConnection(void *ctx, unsigned char *data)
  * HandlerUIInitiateConnection()
  *     Description:
  *         Handle the connection when a new device is selected in the UI
+ *         Rather than doing any connecting here, we instead set the correct
+ *         states so that the disconnection or scan event will
  *     Params:
  *         void *ctx - The context provided at registration
  *         unsigned char *tmp - Any event data
@@ -110,16 +129,14 @@ void HandlerUICloseConnection(void *ctx, unsigned char *data)
 void HandlerUIInitiateConnection(void *ctx, unsigned char *deviceId)
 {
     HandlerContext_t *context = (HandlerContext_t *) ctx;
-    if (context->bt->activeDevice.deviceId != 0) {
-        BTCommandDisconnect(context->bt);
-    }
-    context->btSelectedDevice = (int8_t) *deviceId;
-    ConfigSetBytes(
-        CONFIG_SETTING_LAST_CONNECTED_DEVICE_MAC,
-        context->bt->pairedDevices[context->btSelectedDevice].macId,
-        BT_MAC_ID_LEN
-    );
-    BTCommandSetConnectable(context->bt, BT_STATE_ON);
+    context->btStatus = HANDLER_BT_STATUS_CONNECTING;
+    context->btSelectedDevice = (uint8_t) *deviceId;
+    // Reset the metadata so we don't display the wrong data
+    BTClearMetadata(context->bt);
+    // Clear the actively paired device
+    BTClearActiveDevice(context->bt);
+    // Close All connections
+    BTCommandDisconnect(context->bt);
 }
 
 /**

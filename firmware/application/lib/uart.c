@@ -6,6 +6,13 @@
  *     easier, and consistent data r/w
  */
 #include "uart.h"
+#include <stdio.h>
+#include <string.h>
+#include "log.h"
+#include "sfr_setters.h"
+#include "timer.h"
+#include "utils.h"
+#include "../mappings.h"
 
 static UART_t *UARTModules[UART_MODULES_COUNT];
 
@@ -95,6 +102,9 @@ void UARTAddModuleHandler(UART_t *uart)
  */
 void UARTDestroy(uint8_t uartModule) {
     UART_t *uart = UARTGetModuleHandler(uartModule);
+    if (uart == 0) {
+        return;
+    }
     // Unlock the reprogrammable pin register and set the pins to zero
     __builtin_write_OSCCONL(OSCCON & 0xBF);
     switch (uartModule) {
@@ -159,7 +169,7 @@ static uint8_t UARTRXInterruptHandler(uint8_t moduleIndex)
         // No frame or parity errors
         if ((uart->registers->uxsta & 0xC) == 0) {
             // Clear the buffer overflow error, if it exists
-            if (CHECK_BIT(uart->registers->uxsta, 1) != 0) {
+            if (UTILS_CHECK_BIT(uart->registers->uxsta, 1) != 0) {
                 uart->rxError ^= UART_ERR_OERR;
                 uart->registers->uxsta ^= 0x2;
             }
@@ -168,15 +178,15 @@ static uint8_t UARTRXInterruptHandler(uint8_t moduleIndex)
             // Set a "General" Error
             uart->rxError ^= UART_ERR_GERR;
             // Clear the buffer overflow error, if it is set
-            if (CHECK_BIT(uart->registers->uxsta, 1) != 0) {
-                uart->rxError ^= UART_ERR_OERR;
+            if (UTILS_CHECK_BIT(uart->registers->uxsta, 1) != 0) {
+                uart->rxError |= UART_ERR_OERR;
                 uart->registers->uxsta ^= 0x2;
             }
-            if (CHECK_BIT(uart->registers->uxsta, 2) != 0) {
-                uart->rxError ^= UART_ERR_FERR;
+            if (UTILS_CHECK_BIT(uart->registers->uxsta, 2) != 0) {
+                uart->rxError |= UART_ERR_FERR;
             }
-            if (CHECK_BIT(uart->registers->uxsta, 3) != 0) {
-                uart->rxError ^= UART_ERR_PERR;
+            if (UTILS_CHECK_BIT(uart->registers->uxsta, 3) != 0) {
+                uart->rxError |= UART_ERR_PERR;
             }
             // Clear the byte in the RX buffer
             // DO NOT use uart->registers->uxrxreg. As of xc16 2.0.0 it will
@@ -207,26 +217,21 @@ static uint8_t UARTRXInterruptHandler(uint8_t moduleIndex)
 void UARTReportErrors(UART_t *uart)
 {
     if (uart->rxError != 0) {
-        long long unsigned int ts = (long long unsigned int) TimerGetMillis();
-        LogRawDebug(
-            LOG_SOURCE_SYSTEM,
-            "[%llu] ERROR: UART[%d]: ",
-            ts,
-            uart->moduleIndex + 1
-        );
+        char flags[UART_ERR_FLAGS_STR_SIZE] = {0};
+        int offset = 0;
         if ((uart->rxError & UART_ERR_GERR) != 0) {
-            LogRawDebug(LOG_SOURCE_SYSTEM, "GERR ");
+            offset += snprintf(flags + offset, sizeof(flags) - offset, "GERR ");
         }
         if ((uart->rxError & UART_ERR_OERR) != 0) {
-            LogRawDebug(LOG_SOURCE_SYSTEM, "OERR ");
+            offset += snprintf(flags + offset, sizeof(flags) - offset, "OERR ");
         }
         if ((uart->rxError & UART_ERR_FERR) != 0) {
-            LogRawDebug(LOG_SOURCE_SYSTEM, "FERR ");
+            offset += snprintf(flags + offset, sizeof(flags) - offset, "FERR ");
         }
         if ((uart->rxError & UART_ERR_PERR) != 0) {
-            LogRawDebug(LOG_SOURCE_SYSTEM, "PERR ");
+            offset += snprintf(flags + offset, sizeof(flags) - offset, "PERR ");
         }
-        LogRawDebug(LOG_SOURCE_SYSTEM, "\r\n");
+        LogError("UART[%d]: %s", uart->moduleIndex + 1, flags);
         uart->rxError = 0;
     }
 }
@@ -259,8 +264,8 @@ void UARTSendString(UART_t *uart, char *data)
     uint16_t i = 0;
     for (i = 0; i < stringLength; i++) {
         char c = data[i];
-        // Print only readable and newline characters
-        if ((c >= 0x20 && c <= 0x7E) || c == 0x0D || c == 0x0A) {
+        // Print only readable, newline, and certain escape characters
+        if ((c >= 0x20 && c <= 0x7E) || c == 0x0D || c == 0x0A || c == 0x1B) {
             uart->registers->uxtxreg = c;
             // Wait for the data to leave the tx buffer
             while ((uart->registers->uxsta & (1 << 9)) != 0);

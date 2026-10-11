@@ -1,13 +1,51 @@
 /*
  * File:   config.h
  * Author: Ted Salmon <tass2001@gmail.com>
- * Description: 
+ * Description:
  *     Get & Set Configuration items on the EEPROM
  */
 #include "config.h"
+#include "eeprom.h"
+#include "utils.h"
+#include <stdio.h>
 
 uint8_t CONFIG_SETTING_CACHE[CONFIG_SETTING_CACHE_SIZE] = {0};
 uint8_t CONFIG_VALUE_CACHE[CONFIG_VALUE_CACHE_SIZE] = {0};
+
+static int8_t CONFIG_TIMEZONE_OFFSETS[CONFIG_TIMEZONE_COUNT] = {
+    0,
+    -1 * (12 * 60 + 00) / 15, // -12:00
+    -1 * (11 * 60 + 00) / 15, // -11:00
+    -1 * (10 * 60 + 00) / 15, // -10:00
+    -1 * (9 * 60 + 00) / 15, // -09:00
+    -1 * (8 * 60 + 00) / 15, // -08:00
+    -1 * (7 * 60 + 00) / 15,
+    -1 * (6 * 60 + 00) / 15,
+    -1 * (5 * 60 + 00) / 15,
+    -1 * (4 * 60 + 00) / 15,
+    -1 * (3 * 60 + 30) / 15,
+    -1 * (3 * 60 + 0) / 15,
+    -1 * (2 * 60 + 0) / 15,
+    -1 * (1 * 60 + 0) / 15,
+     0 * (0 * 60 + 0) / 15, // + 00:00 UTC
+    +1 * (1 * 60 + 0) / 15,
+    +1 * (2 * 60 + 0) / 15,
+    +1 * (3 * 60 + 0) / 15,
+    +1 * (3 * 60 + 30) / 15,
+    +1 * (4 * 60 + 0) / 15,
+    +1 * (4 * 60 + 30) / 15, // +04:30
+    +1 * (5 * 60 + 0) / 15, // +05:00
+    +1 * (5 * 60 + 30) / 15, // +05:30
+    +1 * (6 * 60 + 0) / 15,
+    +1 * (7 * 60 + 0) / 15,
+    +1 * (8 * 60 + 0) / 15,
+    +1 * (9 * 60 + 0) / 15,
+    +1 * (9 * 60 + 30) / 15, // +09:30
+    +1 * (10 * 60 + 0) / 15,
+    +1 * (10 * 60 + 30) / 15, // +10:30
+    +1 * (11 * 60 + 0) / 15,
+    +1 * (12 * 60 + 0) / 15, // +12:00
+};
 
 /**
  * ConfigGetByte()
@@ -44,7 +82,7 @@ static inline uint8_t ConfigGetByte(uint8_t address)
  *         uint8_t address - The address to read from
  *         uint8_t value - Value to set
  */
-static inline void ConfigSetByte(uint8_t address, uint8_t value)
+void ConfigSetByte(uint8_t address, uint8_t value)
 {
     if (address < CONFIG_SETTING_CACHE_SIZE) {
         CONFIG_SETTING_CACHE[address] = value;
@@ -70,6 +108,28 @@ uint16_t ConfigGetBC127BootFailures()
         return 0;
     }
     return (msb << 8) + lsb;
+}
+
+/**
+ * ConfigGetBTDeviceName()
+ *     Description:
+ *         Get the configured Bluetooth device name. An unset name is returned
+ *         as an empty string
+ *     Params:
+ *         char *name - A buffer of at least
+ *             CONFIG_STRING_BT_DEVICE_NAME_LEN + 1 bytes, since the string in
+ *             the EEPROM is not guaranteed to be terminated
+ *     Returns:
+ *         void
+ */
+void ConfigGetBTDeviceName(char *name)
+{
+    ConfigGetString(
+        CONFIG_STRING_BT_DEVICE_NAME_ADDRESS,
+        name,
+        CONFIG_STRING_BT_DEVICE_NAME_LEN
+    );
+    name[CONFIG_STRING_BT_DEVICE_NAME_LEN] = '\0';
 }
 
 /**
@@ -177,6 +237,20 @@ uint8_t ConfigGetComfortUnlock()
 }
 
 /**
+ * ConfigGetDistUnit()
+ *     Description:
+ *         Return the distance units that the vehicle is configured for
+ *     Params:
+ *         None
+ *     Returns:
+ *         uint8_t
+ */
+uint8_t ConfigGetDistUnit()
+{
+    return ConfigGetByteUpperNibble(CONFIG_SETTING_BMBT_DIST_UNIT_ADDRESS);
+}
+
+/**
  * ConfigGetFirmwareVersionMajor()
  *     Description:
  *         Get the major firmware version
@@ -256,7 +330,9 @@ uint8_t ConfigGetIKEType()
 /**
  * ConfigGetLightingFeaturesActive()
  *     Description:
- *         Check if any lighting features are active and return a boolean
+ *         Check if blinker or parkling lighting features are active and
+ *         return a boolean. Other lighting features are irrelevant as they
+ *         activate with the car off
  *     Params:
  *         None
  *     Returns:
@@ -424,17 +500,52 @@ uint8_t ConfigGetTempUnit()
 }
 
 /**
- * ConfigGetDistUnit()
+ * ConfigGetTimeSource()
  *     Description:
- *         Return the distance units that the vehicle is configured for
- *     Params:
- *         None
+ *         Return the configured source of time
  *     Returns:
- *         uint8_t
+ *         uint8_t - CONFIG_SETTING_AUTO_TIME_PHONE | CONFIG_SETTING_AUTO_TIME_GPS | CONFIG_SETTING_OFF
  */
-uint8_t ConfigGetDistUnit()
+uint8_t ConfigGetTimeSource()
 {
-    return ConfigGetByteUpperNibble(CONFIG_SETTING_BMBT_DIST_UNIT_ADDRESS);
+    return ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & (CONFIG_SETTING_AUTO_TIME_PHONE | CONFIG_SETTING_AUTO_TIME_GPS);
+}
+
+
+/**
+ * ConfigGetTimeDST()
+ *     Description:
+ *         Return the configured DST state
+ *     Returns:
+ *         uint8_t - CONFIG_SETTING_AUTO_TIME_DST | CONFIG_SETTING_OFF
+ */
+uint8_t ConfigGetTimeDST()
+{
+    return ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & CONFIG_SETTING_AUTO_TIME_DST;
+}
+
+/**
+ * ConfigGetTimeOffset()
+ *     Description:
+ *         Return the configured time offset in minutes
+ *     Returns:
+ *         int16_t - time offset in minutes
+ */
+int16_t ConfigGetTimeOffset()
+{
+    return CONFIG_TIMEZONE_OFFSETS[ConfigGetTimeOffsetIndex()] * 15;
+}
+
+/**
+ * ConfigGetTimeOffsetIndex()
+ *     Description:
+ *         Return the configured time offset index
+ *     Returns:
+ *         int16_t - time offset as table index
+ */
+uint8_t ConfigGetTimeOffsetIndex()
+{
+    return (ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & CONFIG_SETTING_AUTO_TIME_TZ) >> 3;
 }
 
 /**
@@ -529,7 +640,7 @@ uint8_t ConfigGetValue(uint8_t value)
  */
 void ConfigGetVehicleIdentity(uint8_t *vin)
 {
-    uint8_t vinAddress[] = CONFIG_VEHICLE_VIN_ADDRESS;
+    uint8_t vinAddress[] = CONFIG_VEHICLE_VIN;
     uint8_t i;
     for (i = 0; i < 5; i++) {
         vin[i] = ConfigGetByte(vinAddress[i]);
@@ -563,6 +674,27 @@ void ConfigSetBC127BootFailures(uint16_t failureCount)
 void ConfigSetBootloaderMode(uint8_t bootloaderMode)
 {
     ConfigSetByte(CONFIG_BOOTLOADER_MODE_ADDRESS, bootloaderMode);
+}
+
+/**
+ * ConfigSetBTDeviceName()
+ *     Description:
+ *         Set the BTM name
+ *     Params:
+ *         char *name - The name to store, up to
+ *             CONFIG_STRING_BT_DEVICE_NAME_LEN characters
+ *     Returns:
+ *         void
+ */
+void ConfigSetBTDeviceName(char *name)
+{
+    char deviceName[CONFIG_STRING_BT_DEVICE_NAME_LEN + 1] = {0};
+    UtilsStrncpy(deviceName, name, CONFIG_STRING_BT_DEVICE_NAME_LEN + 1);
+    ConfigSetString(
+        CONFIG_STRING_BT_DEVICE_NAME_ADDRESS,
+        deviceName,
+        CONFIG_STRING_BT_DEVICE_NAME_LEN
+    );
 }
 
 /**
@@ -647,6 +779,20 @@ void ConfigSetComfortLock(uint8_t comfortLock)
 void ConfigSetComfortUnlock(uint8_t comfortUnlock)
 {
     ConfigSetByteLowerNibble(CONFIG_SETTING_COMFORT_LOCKS, comfortUnlock);
+}
+
+/**
+ * ConfigSetDistUnit()
+ *     Description:
+ *         Set the temperature unit setting
+ *     Params:
+ *         uint8_t distUnit - The distance unit
+ *     Returns:
+ *         void
+ */
+void ConfigSetDistUnit(uint8_t distUnit)
+{
+    ConfigSetByteUpperNibble(CONFIG_SETTING_BMBT_DIST_UNIT, distUnit);
 }
 
 /**
@@ -803,17 +949,71 @@ void ConfigSetTempUnit(uint8_t tempUnit)
 }
 
 /**
- * ConfigSetDistUnit()
+ * ConfigSetTimeDST()
  *     Description:
- *         Set the temperature unit setting
+ *         Set the DST state
  *     Params:
- *         uint8_t distUnit - The distance unit
+ *         uint8_t dst - CONFIG_SETTING_TIME_DST | CONFIG_SETTING_OFF
  *     Returns:
  *         void
  */
-void ConfigSetDistUnit(uint8_t distUnit)
+void ConfigSetTimeDST(uint8_t dst)
 {
-    ConfigSetByteUpperNibble(CONFIG_SETTING_BMBT_DIST_UNIT_ADDRESS, distUnit);
+    if (dst == 1) {
+        dst = CONFIG_SETTING_AUTO_TIME_DST;
+    }
+    uint8_t val = (ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & 0b11111011) | dst;
+    ConfigSetByte(CONFIG_SETTING_AUTO_TIME, val);
+}
+
+/**
+ * ConfigSetTimeOffset()
+ *     Description:
+ *         Set the timezone offset
+ *     Params:
+ *         int16_t offset - The offset in minutes
+ *     Returns:
+ *         void
+ */
+void ConfigSetTimeOffset(int16_t offset)
+{
+    uint8_t idx;
+    int16_t calculatedOffset = offset / 15;
+    for (idx = 1; idx < CONFIG_TIMEZONE_COUNT; idx++) {
+        if (calculatedOffset == CONFIG_TIMEZONE_OFFSETS[idx]) {
+            ConfigSetTimeOffsetIndex(idx);
+        }
+    }
+}
+
+/**
+ * ConfigSetTimeOffsetIndex()
+ *     Description:
+ *         Set the timezone offset
+ *     Params:
+ *         uint8_t idx - Time offset table index
+ *     Returns:
+ *         void
+ */
+void ConfigSetTimeOffsetIndex(uint8_t idx)
+{
+    uint8_t val = ( ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & 0b00000111 ) | (idx << 3);
+    ConfigSetByte(CONFIG_SETTING_AUTO_TIME, val);
+}
+
+/**
+ * ConfigSetTimeSource()
+ *     Description:
+ *         Set the time source
+ *     Params:
+ *         uint8_t source - CONFIG_SETTING_AUTO_TIME_PHONE | CONFIG_SETTING_AUTO_TIME_GPS | CONFIG_SETTING_OFF
+ *     Returns:
+ *         void
+ */
+void ConfigSetTimeSource(uint8_t source)
+{
+    uint8_t val = (ConfigGetByte(CONFIG_SETTING_AUTO_TIME) & 0b11111100) | source;
+    ConfigSetByte(CONFIG_SETTING_AUTO_TIME, val);
 }
 
 /**
@@ -822,7 +1022,7 @@ void ConfigSetDistUnit(uint8_t distUnit)
  *         Set the trap count for the given trap
  *     Params:
  *         uint8_t trap - The trap triggered
- *         uint8_t count - The number 
+ *         uint8_t count - The number
  *     Returns:
  *         void
  */

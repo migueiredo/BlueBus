@@ -5,7 +5,15 @@
  *     Implementation of the Sierra Wireless BC127 Bluetooth UART API
  */
 #include "bt_bc127.h"
+#include "../event.h"
 #include "../locale.h"
+#include "../log.h"
+#include "../timer.h"
+#include "../utils.h"
+#include "bt_common.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 /** BC127CVCGainTable
  * C0 - D6 (22 Settings)
@@ -37,6 +45,9 @@ int8_t BTBC127MicGainTable[] = {
     36,
     39 // Technically 39.5 - D6
 };
+
+/* The literal 6-char escape sequence the BC127 uses for CRLF in PBAP data */
+static const char BC127_PBAP_DELIM[] = "\\0D\\0A";
 
 /**
  * BC127ClearPairingErrors()
@@ -114,7 +125,7 @@ void BC127CommandBackward(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
         bt->metadataTimestamp = 0;
-        char command[18];
+        char command[18] = {0};
         snprintf(command, 18, "MUSIC %d BACKWARD", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -134,7 +145,7 @@ void BC127CommandBackward(BT_t *bt)
 void BC127CommandBackwardSeekPress(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[19];
+        char command[19] = {0};
         snprintf(command, 19, "MUSIC %d REW_PRESS", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -154,7 +165,7 @@ void BC127CommandBackwardSeekPress(BT_t *bt)
 void BC127CommandBackwardSeekRelease(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[21];
+        char command[21] = {0};
         snprintf(command, 21, "MUSIC %d REW_RELEASE", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -173,7 +184,7 @@ void BC127CommandBackwardSeekRelease(BT_t *bt)
  */
 void BC127CommandCallAnswer(BT_t *bt)
 {
-    char command[15];
+    char command[15] = {0};
     snprintf(command, 15, "CALL %d ANSWER", bt->activeDevice.hfpId);
     BC127SendCommand(bt, command);
 }
@@ -189,7 +200,7 @@ void BC127CommandCallAnswer(BT_t *bt)
  */
 void BC127CommandCallEnd(BT_t *bt)
 {
-    char command[12];
+    char command[12] = {0};
     snprintf(command, 12, "CALL %d END", bt->activeDevice.hfpId);
     BC127SendCommand(bt, command);
 }
@@ -205,7 +216,7 @@ void BC127CommandCallEnd(BT_t *bt)
  */
 void BC127CommandCallReject(BT_t *bt)
 {
-    char command[15];
+    char command[15] = {0};
     snprintf(command, 15, "CALL %d REJECT", bt->activeDevice.hfpId);
     BC127SendCommand(bt, command);
 }
@@ -226,7 +237,7 @@ void BC127CommandClose(BT_t *bt, uint8_t id)
         char command[10] = "CLOSE ALL";
         BC127SendCommand(bt, command);
     } else {
-        char command[9];
+        char command[9] = {0};
         snprintf(command, 9, "CLOSE %d", id);
         BC127SendCommand(bt, command);
     }
@@ -247,7 +258,7 @@ void BC127CommandClose(BT_t *bt, uint8_t id)
  */
 void BC127CommandCVC(BT_t *bt, char *band, uint8_t index, uint8_t length)
 {
-    char command[16];
+    char command[16] = {0};
     if (length == 0) {
         snprintf(command, 16, "CVC_CFG %s", band);
     } else {
@@ -301,7 +312,7 @@ void BC127CommandCVC(BT_t *bt, char *band, uint8_t index, uint8_t length)
  */
 void BC127CommandCVCParams(BT_t *bt, char *params)
 {
-    char command[255];
+    char command[255] = {0};
     snprintf(command, 255, "%s", params);
     BC127SendCommand(bt, command);
 }
@@ -321,8 +332,8 @@ void BC127CommandBtState(BT_t *bt, uint8_t connectable, uint8_t discoverable)
 {
     bt->connectable = connectable;
     bt->discoverable = discoverable;
-    char connectMode[4];
-    char discoverMode[4];
+    char connectMode[4] = {0};
+    char discoverMode[4] = {0};
     if (connectable == 1) {
         UtilsStrncpy(connectMode, "ON", 4);
     } else if (connectable == 0) {
@@ -351,7 +362,7 @@ void BC127CommandForward(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
         bt->metadataTimestamp = 0;
-        char command[17];
+        char command[17] = {0};
         snprintf(command, 17, "MUSIC %d FORWARD", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -371,7 +382,7 @@ void BC127CommandForward(BT_t *bt)
 void BC127CommandForwardSeekPress(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[18];
+        char command[18] = {0};
         snprintf(command, 18, "MUSIC %d FF_PRESS", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -391,7 +402,7 @@ void BC127CommandForwardSeekPress(BT_t *bt)
 void BC127CommandForwardSeekRelease(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[20];
+        char command[20] = {0};
         snprintf(command, 20, "MUSIC %d FF_RELEASE", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -405,14 +416,24 @@ void BC127CommandForwardSeekRelease(BT_t *bt)
  *         Get the friendly name of device with the provided Bluetooth address
  *     Params:
  *         BT_t *bt - A pointer to the module object
- *         char *macId - The MAC ID of the device to get the name for
+ *         BTPairedDevice_t *dev - The device to get the name for
  *     Returns:
  *         void
  */
-void BC127CommandGetDeviceName(BT_t *bt, char *macId)
+void BC127CommandGetDeviceName(BT_t *bt, BTPairedDevice_t *dev)
 {
-    char command[18];
-    snprintf(command, 18, "NAME %s", macId);
+    char command[18] = {0};
+    snprintf(
+        command,
+        18,
+        "NAME %02X%02X%02X%02X%02X%02X",
+        dev->macId[0],
+        dev->macId[1],
+        dev->macId[2],
+        dev->macId[3],
+        dev->macId[4],
+        dev->macId[5]
+    );
     BC127SendCommand(bt, command);
 }
 
@@ -428,7 +449,7 @@ void BC127CommandGetDeviceName(BT_t *bt, char *macId)
 void BC127CommandGetMetadata(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[19];
+        char command[19] = {0};
         snprintf(command, 19, "AVRCP_META_DATA %d", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
         bt->metadataTimestamp = TimerGetMillis();
@@ -455,19 +476,19 @@ void BC127CommandLicense(
 ) {
     // Get both license keys
     if (licenseType == 0 && licenseKey == 0) {
-        char command[9];
+        char command[9] = {0};
         snprintf(command, 8, "LICENSE");
         BC127SendCommand(bt, command);
     }
     // Get a single license key
     if (licenseType != 0 && licenseKey == 0) {
-        char command[14];
+        char command[14] = {0};
         snprintf(command, 13, "LICENSE %s", licenseType);
         BC127SendCommand(bt, command);
     }
     // Set a single license key
     if (licenseType != 0 && licenseKey != 0) {
-        char command[40];
+        char command[40] = {0};
         snprintf(command, 39, "LICENSE %s=%s", licenseType, licenseKey);
         BC127SendCommand(bt, command);
     }
@@ -484,9 +505,110 @@ void BC127CommandLicense(
  */
 void BC127CommandList(BT_t *bt)
 {
-    char command[5];
+    char command[5] = {0};
     snprintf(command, 5, "LIST");
     BC127SendCommand(bt, command);
+}
+
+/**
+ * BC127CommandPBAPAbort()
+ *     Description:
+ *         Abort an active phonebook download
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BC127CommandPBAPAbort(BT_t *bt)
+{
+    if (bt->activeDevice.pbapId != 0) {
+        char command[13] = {0};
+        snprintf(command, 13, "PB_ABORT %02X", bt->activeDevice.pbapId);
+        BC127SendCommand(bt, command);
+    } else {
+        LogWarning("BT: Unable to PB_ABORT - PBAP link unopened");
+    }
+}
+
+/**
+ * BC127CommandPBAPClose()
+ *     Description:
+ *         Close the PBAP session by closing the PBAP profile link
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BC127CommandPBAPClose(BT_t *bt)
+{
+    if (bt->activeDevice.pbapId != 0) {
+        if (bt->pbap.status != BT_PBAP_STATUS_IDLE) {
+            BC127CommandPBAPAbort(bt);
+        }
+        BC127CommandProfileClose(bt, bt->activeDevice.pbapId);
+    } else {
+        LogWarning("BT: Unable to close PBAP - link unopened");
+    }
+}
+
+/**
+ * BC127CommandPBAPGetPhonebook()
+ *     Description:
+ *         Download contacts from the phone via PBAP.
+ *         PB_PULL <link_ID> <repository> <phonebook> <maxlist> <start_index> <filter>
+ *         Filter 0x82 = FN | TEL
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         uint8_t phonebook - The phonebook to pull (1=main, 2=incoming, 3=outgoing, 4=missed, 5=combined)
+ *         uint16_t startIndex - The starting index
+ *         uint8_t maxList - Maximum number of entries to download
+ *     Returns:
+ *         void
+ */
+void BC127CommandPBAPGetPhonebook(BT_t *bt, uint8_t phonebook, uint16_t startIndex, uint8_t maxList)
+{
+    if (bt->activeDevice.pbapId != 0) {
+        bt->pbap.status = BT_PBAP_STATUS_PENDING;
+        bt->pbap.contactCount = 0;
+        bt->pbap.contactIdx = 0;
+        memset(&bt->pbap.parser, 0, sizeof(bt->pbap.parser));
+        memset(bt->pbap.contacts, 0, sizeof(bt->pbap.contacts));
+        char command[32] = {0};
+        snprintf(
+            command,
+            32,
+            "PB_PULL %d 1 %d %d %d 82",
+            bt->activeDevice.pbapId,
+            phonebook,
+            maxList,
+            startIndex
+        );
+        BC127SendCommand(bt, command);
+    } else {
+        LogWarning("BT: Unable to PB_PULL - PBAP link unopened");
+    }
+}
+
+/**
+ * BC127CommandPBAPOpen()
+ *     Description:
+ *         Open a PBAP profile connection with the active device
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BC127CommandPBAPOpen(BT_t *bt)
+{
+    if (bt->activeDevice.deviceId != 0) {
+        BC127CommandProfileOpen(
+            bt,
+            &bt->pairedDevices[bt->activeDevice.deviceIndex],
+            "PBAP"
+        );
+    } else {
+        LogWarning("BT: Unable to open PBAP - no active device");
+    }
 }
 
 /**
@@ -501,7 +623,7 @@ void BC127CommandList(BT_t *bt)
 void BC127CommandPause(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[16];
+        char command[16] = {0};
         snprintf(command, 16, "MUSIC %d PAUSE", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -521,7 +643,7 @@ void BC127CommandPause(BT_t *bt)
 void BC127CommandPlay(BT_t *bt)
 {
     if (bt->activeDevice.avrcpId != 0) {
-        char command[15];
+        char command[15] = {0};
         snprintf(command, 15, "MUSIC %d PLAY", bt->activeDevice.avrcpId);
         BC127SendCommand(bt, command);
     } else {
@@ -541,7 +663,7 @@ void BC127CommandPlay(BT_t *bt)
  */
 void BC127CommandProfileClose(BT_t *bt, uint8_t linkId)
 {
-    char command[10];
+    char command[10] = {0};
     snprintf(command, 10, "CLOSE %d", linkId);
     BC127SendCommand(bt, command);
 }
@@ -557,22 +679,21 @@ void BC127CommandProfileClose(BT_t *bt, uint8_t linkId)
  *     Returns:
  *         void
  */
-void BC127CommandProfileOpen(BT_t *bt, char *profile)
+void BC127CommandProfileOpen(BT_t *bt, BTPairedDevice_t *dev, char *profile)
 {
-     char command[24];
-    char macId[13] = {0};
+    char command[24] = {0};
     snprintf(
-        macId,
-        13,
-        "%02X%02X%02X%02X%02X%02X",
-        bt->activeDevice.macId[0],
-        bt->activeDevice.macId[1],
-        bt->activeDevice.macId[2],
-        bt->activeDevice.macId[3],
-        bt->activeDevice.macId[4],
-        bt->activeDevice.macId[5]
+        command,
+        24,
+        "OPEN %02X%02X%02X%02X%02X%02X %s",
+        dev->macId[0],
+        dev->macId[1],
+        dev->macId[2],
+        dev->macId[3],
+        dev->macId[4],
+        dev->macId[5],
+        profile
     );
-    snprintf(command, 24, "OPEN %s %s", macId, profile);
     bt->status = BT_STATUS_CONNECTING;
     BC127SendCommand(bt, command);
 }
@@ -604,7 +725,7 @@ void BC127CommandReset(BT_t *bt)
  *         void
  */
 void BC127CommandSetAudio(BT_t *bt, uint8_t input, uint8_t output) {
-    char command[14];
+    char command[14] = {0};
     snprintf(command, 14, "SET AUDIO=%d %d", input, output);
     BC127SendCommand(bt, command);
     BC127CommandWrite(bt);
@@ -630,7 +751,7 @@ void BC127CommandSetAudioAnalog(
     uint8_t micBias,
     char *enablePreamp
 ) {
-    char command[29];
+    char command[29] = {0};
     snprintf(
         command,
         29,
@@ -664,7 +785,7 @@ void BC127CommandSetAudioDigital(
     char *p1,
     char *p2
 ) {
-    char command[40];
+    char command[40] = {0};
     snprintf(command, 40, "SET AUDIO_DIGITAL=%s %s %s %s OFF", format, rate, p1, p2);
     BC127SendCommand(bt, command);
     BC127CommandWrite(bt);
@@ -682,7 +803,7 @@ void BC127CommandSetAudioDigital(
  */
 void BC127CommandSetAutoConnect(BT_t *bt, uint8_t autoConnect)
 {
-    char command[15];
+    char command[15] = {0};
     snprintf(command, 15, "SET AUTOCONN=%d", autoConnect);
     BC127SendCommand(bt, command);
     BC127CommandWrite(bt);
@@ -708,7 +829,7 @@ void BC127CommandSetBtState(
     uint8_t connectMode,
     uint8_t discoverMode
 ) {
-    char command[24];
+    char command[24] = {0};
     snprintf(command, 24, "SET BT_STATE_CONFIG=%d %d", connectMode, discoverMode);
     BC127SendCommand(bt, command);
     BC127CommandWrite(bt);
@@ -921,7 +1042,7 @@ void BC127CommandSetProfiles(
     uint8_t ble,
     uint8_t hfp
 ) {
-    char command[37];
+    char command[37] = {0};
     snprintf(
         command,
         37,
@@ -1009,7 +1130,7 @@ void BC127CommandStatusAVRCP(BT_t *bt)
 void BC127CommandToggleVR(BT_t *bt)
 {
     if (bt->activeDevice.hfpId != 0) {
-        char command[16];
+        char command[16] = {0};
         snprintf(command, 16, "TOGGLE_VR %d", bt->activeDevice.hfpId);
         BC127SendCommand(bt, command);
     } else {
@@ -1029,7 +1150,7 @@ void BC127CommandToggleVR(BT_t *bt)
  */
 void BC127CommandTone(BT_t *bt, char *params)
 {
-    char command[128];
+    char command[128] = {0};
     snprintf(command, 128, "TONE %s", params);
     BC127SendCommand(bt, command);
 }
@@ -1083,7 +1204,7 @@ void BC127CommandVolume(BT_t *bt, uint8_t linkId, char *volume)
         char command[7] = "VOLUME";
         BC127SendCommand(bt, command);
     } else {
-        char command[15];
+        char command[15] = {0};
         snprintf(command, 15, "VOLUME %d %s", linkId, volume);
         BC127SendCommand(bt, command);
     }
@@ -1202,20 +1323,16 @@ void BC127ProcessEventAT(BT_t *bt, char **msgBuf, uint8_t delimCount)
             p = strtok(0x00, delimeter);
         }
         // Set and clean up the variables to hold the new caller ID text
-        uint16_t cidLen = strlen(cidDataBuf[0]);
-        if (cidDelimCounter > 2) {
-            cidLen = strlen(cidDataBuf[cidDelimCounter - 1]);
-        }
         char callerId[BT_CALLER_ID_FIELD_SIZE + 1]  = {0};
         if (cidDelimCounter == 2) {
             // Remove the escaped quotes that come through
-            UtilsRemoveSubstring(cidDataBuf[0], "\\22");
+            UtilsSubstrRemove(cidDataBuf[0], "\\22");
             // Clean the text up
             UtilsNormalizeText(callerId, cidDataBuf[0], BT_CALLER_ID_FIELD_SIZE);
         } else {
             if (cidDataBuf[cidDelimCounter - 1] != 0x00) {
                 // Remove the escaped quotes that come through
-                UtilsRemoveSubstring(cidDataBuf[cidDelimCounter - 1], "\\22");
+                UtilsSubstrRemove(cidDataBuf[cidDelimCounter - 1], "\\22");
                 // Clean the text up
                 UtilsNormalizeText(callerId, cidDataBuf[cidDelimCounter - 1], BT_CALLER_ID_FIELD_SIZE);
             }
@@ -1233,14 +1350,15 @@ void BC127ProcessEventAT(BT_t *bt, char **msgBuf, uint8_t delimCount)
         // Example 24h: \2222/10/19, 00:08:18\22
         //         12h: \2223/01/13, 1:31:00 pm\22
 
-        UtilsRemoveSubstring(msgBuf[4], "\\22");
-        UtilsRemoveSubstring(msgBuf[5], "\\22");
+        UtilsSubstrRemove(msgBuf[4], "\\22");
+        UtilsSubstrRemove(msgBuf[5], "\\22");
 
         uint8_t datetime[6] = {0};
         uint8_t sepCount = 0;
         uint8_t i = 0;
         char *date = msgBuf[4];
         char *time = msgBuf[5];
+        char meridiem[3] = {0};
         // Convert the date to an integer and store it
         while (i < strlen(date) && sepCount < 3) {
             if (date[i] >= '0' && date[i] <= '9') {
@@ -1252,33 +1370,48 @@ void BC127ProcessEventAT(BT_t *bt, char **msgBuf, uint8_t delimCount)
         }
         // Convert the time to an integer and store it
         i = 0;
-        while (i < strlen(time) && sepCount < 6) {
-            if (time[i] >= '0' && time[i] <= '9') {
-                datetime[sepCount] = 10 * datetime[sepCount] + (time[i] - '0');
-            } else {
-                sepCount++;
+        uint8_t meridiemIdx = 0;
+        while (i < strlen(time)) {
+            if (sepCount < 6) {
+                if (time[i] >= '0' && time[i] <= '9') {
+                    datetime[sepCount] = 10 * datetime[sepCount] + (time[i] - '0');
+                } else {
+                    sepCount++;
+                }
+            }
+            // Per the spec, the time-type does not need to be space separated from the time
+            if (sepCount >= 6 && meridiemIdx < 3) {
+                meridiem[meridiemIdx] = time[i];
+                meridiemIdx++;
             }
             i++;
         }
         // Handle AM / PM
-        if (delimCount > 6) {
+        // If we have a sixth index in the msgBuf, this is probably AM / PM
+        if (delimCount > 6 && msgBuf[6] != 0) {
+            if (strlen(msgBuf[6]) == 2) {
+                meridiem[0] = msgBuf[6][0];
+                meridiem[1] = msgBuf[6][1];
+            }
+        }
+        if (meridiem[0] != 0) {
             if (UtilsStricmp(msgBuf[6], "AM") == 0) {
-                if (datetime[BC127_AT_DATE_HOUR] == 12) {
-                    datetime[BC127_AT_DATE_HOUR] = 0;
+                if (datetime[UTILS_DATETIME_HOUR] == 12) {
+                    datetime[UTILS_DATETIME_HOUR] = 0;
                 }
             } else {
-                if (datetime[BC127_AT_DATE_HOUR] < 12) {
-                    datetime[BC127_AT_DATE_HOUR] += 12;
+                if (datetime[UTILS_DATETIME_HOUR] < 12) {
+                    datetime[UTILS_DATETIME_HOUR] += 12;
                 }
             }
         }
         // Validate the date and time
-        if (datetime[BC127_AT_DATE_YEAR] > 20 &&
-            datetime[BC127_AT_DATE_MONTH] >= 1 && datetime[BC127_AT_DATE_MONTH] <= 12 &&
-            datetime[BC127_AT_DATE_DAY] >= 1 && datetime[BC127_AT_DATE_DAY] <= 31 &&
-            datetime[BC127_AT_DATE_HOUR] <= 23 &&
-            datetime[BC127_AT_DATE_MIN] <= 59 &&
-            datetime[BC127_AT_DATE_SEC] <= 59
+        if (datetime[UTILS_DATETIME_YEAR] > 20 &&
+            datetime[UTILS_DATETIME_MONTH] >= 1 && datetime[UTILS_DATETIME_MONTH] <= 12 &&
+            datetime[UTILS_DATETIME_DAY] >= 1 && datetime[UTILS_DATETIME_DAY] <= 31 &&
+            datetime[UTILS_DATETIME_HOUR] <= 23 &&
+            datetime[UTILS_DATETIME_MIN] <= 59 &&
+            datetime[UTILS_DATETIME_SEC] <= 59
         ) {
             EventTriggerCallback(BT_EVENT_TIME_UPDATE, datetime);
         }
@@ -1300,7 +1433,7 @@ void BC127ProcessEventAVRCPMedia(BT_t *bt, char **msgBuf, char *msg)
     if (strcmp(msgBuf[2], "TITLE:") == 0) {
         char title[BT_METADATA_MAX_SIZE] = {0};
         UtilsNormalizeText(title, &msg[BC127_METADATA_TITLE_OFFSET], BT_METADATA_MAX_SIZE);
-        if(strncmp(bt->title, title, BT_METADATA_FIELD_SIZE - 1) != 0) {
+        if(strncmp(bt->title, title, BT_METADATA_FIELD_SIZE) != 0) {
             bt->metadataStatus = BT_METADATA_STATUS_UPD;
             memset(bt->title, 0, BT_METADATA_FIELD_SIZE);
             memset(bt->artist, 0, BT_METADATA_FIELD_SIZE);
@@ -1310,7 +1443,7 @@ void BC127ProcessEventAVRCPMedia(BT_t *bt, char **msgBuf, char *msg)
     } else if (strcmp(msgBuf[2], "ARTIST:") == 0) {
         char artist[BT_METADATA_MAX_SIZE] = {0};
         UtilsNormalizeText(artist, &msg[BC127_METADATA_ARTIST_OFFSET], BT_METADATA_MAX_SIZE);
-        if(strncmp(bt->artist, artist, BT_METADATA_FIELD_SIZE - 1) != 0) {
+        if(strncmp(bt->artist, artist, BT_METADATA_FIELD_SIZE) != 0) {
             bt->metadataStatus = BT_METADATA_STATUS_UPD;
             memset(bt->artist, 0, BT_METADATA_FIELD_SIZE);
             UtilsStrncpy(bt->artist, artist, BT_METADATA_FIELD_SIZE);
@@ -1319,7 +1452,7 @@ void BC127ProcessEventAVRCPMedia(BT_t *bt, char **msgBuf, char *msg)
         if (strcmp(msgBuf[2], "ALBUM:") == 0) {
             char album[BT_METADATA_MAX_SIZE] = {0};
             UtilsNormalizeText(album, &msg[BC127_METADATA_ALBUM_OFFSET], BT_METADATA_MAX_SIZE);
-            if(strncmp(bt->album, album, BT_METADATA_FIELD_SIZE - 1) != 0) {
+            if(strncmp(bt->album, album, BT_METADATA_FIELD_SIZE) != 0) {
                 bt->metadataStatus = BT_METADATA_STATUS_UPD;
                 memset(bt->album, 0, BT_METADATA_FIELD_SIZE);
                 UtilsStrncpy(bt->album, album, BT_METADATA_FIELD_SIZE);
@@ -1334,8 +1467,8 @@ void BC127ProcessEventAVRCPMedia(BT_t *bt, char **msgBuf, char *msg)
                 bt->album
             );
             EventTriggerCallback(BT_EVENT_METADATA_UPDATE, 0);
+            bt->metadataStatus = BT_METADATA_STATUS_CUR;
         }
-        bt->metadataStatus = BT_METADATA_STATUS_CUR;
     }
     bt->metadataTimestamp = TimerGetMillis();
 }
@@ -1406,7 +1539,7 @@ void BC127ProcessEventBuild(BT_t *bt, char **msgBuf)
     // The device sometimes resets without sending the "Ready" message
     // so we instead watch for the build string
     memset(&bt->activeDevice, 0, sizeof(BTConnection_t));
-    bt->activeDevice = BTConnectionInit();
+    BTClearActiveDevice(bt);
     bt->callStatus = BT_CALL_INACTIVE;
     bt->metadataStatus = BT_METADATA_STATUS_CUR;
     LogDebug(LOG_SOURCE_BT, "BT: Boot Complete");
@@ -1457,7 +1590,17 @@ void BC127ProcessEventCloseOk(BT_t *bt, char **msgBuf)
 {
     uint8_t deviceId = BC127GetDeviceId(msgBuf[1]);
     // If the open connection is closing, update the state
-    if (bt->activeDevice.deviceId == deviceId) {
+    if (
+        bt->activeDevice.deviceId == deviceId ||
+        bt->activeDevice.deviceId == 0
+    ) {
+        LogDebug(LOG_SOURCE_BT, "BT: Closed Link: %s", msgBuf[1]);
+        if (strcmp(msgBuf[2], "PBAP") == 0) {
+            bt->pbap.active = 0;
+            bt->pbap.status = BT_PBAP_STATUS_IDLE;
+            uint8_t pbapStatus = 0xFF;
+            EventTriggerCallback(BT_EVENT_PBAP_SESSION_STATUS, &pbapStatus);
+        }
         uint8_t status = BC127ConnectionCloseProfile(
             &bt->activeDevice,
             msgBuf[2]
@@ -1466,13 +1609,13 @@ void BC127ProcessEventCloseOk(BT_t *bt, char **msgBuf)
             LogDebug(LOG_SOURCE_BT, "BT: Device Disconnected");
             bt->playbackStatus = BT_AVRCP_STATUS_PAUSED;
             // Notify the world that the device disconnected
-            memset(&bt->activeDevice, 0, sizeof(BTConnection_t));
-            bt->activeDevice = BTConnectionInit();
+            BTClearActiveDevice(bt);
             bt->status = BT_STATUS_DISCONNECTED;
+            uint8_t linkType = BT_LINK_TYPE_ACL;
+            EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+            EventTriggerCallback(BT_EVENT_DEVICE_LINK_DISCONNECTED, &linkType);
             EventTriggerCallback(BT_EVENT_PLAYBACK_STATUS_CHANGE, 0);
-            EventTriggerCallback(BT_EVENT_DEVICE_LINK_DISCONNECTED, 0);
         }
-        LogDebug(LOG_SOURCE_BT, "BT: Closed link %s", msgBuf[1]);
     }
 }
 
@@ -1493,32 +1636,74 @@ void BC127ProcessEventLink(BT_t *bt, char **msgBuf)
     // No active device is configured
     if (bt->activeDevice.deviceId == 0) {
         LogDebug(LOG_SOURCE_BT, "BT: New Active Device");
-        bt->activeDevice.deviceId = deviceId;
-        BC127ConvertMACIDToHex(msgBuf[4], bt->activeDevice.macId);
-        char *deviceName = BTPairedDeviceGetName(bt, bt->activeDevice.macId);
-        if (deviceName != 0) {
-            UtilsStrncpy(bt->activeDevice.deviceName, deviceName, BT_DEVICE_NAME_LEN);
-        } else {
-            BC127CommandGetDeviceName(bt, msgBuf[4]);
+        BTClearActiveDevice(bt);
+        uint8_t macId[6] = {0};
+        BC127ConvertMACIDToHex(msgBuf[4], macId);
+        uint8_t deviceIndex = BTPairedDeviceFind(bt, macId);
+        if (deviceIndex == 0xFF) {
+            BTPairedDeviceInit(bt, macId, bt->pairedDevicesCount);
+            deviceIndex = BTPairedDeviceFind(bt, macId);
         }
+        bt->activeDevice.deviceIndex = deviceIndex;
+        bt->activeDevice.status = BT_DEVICE_STATUS_CONNECTED;
+        bt->activeDevice.deviceId = deviceId;
+        BTPairedDevice_t *dev = &bt->pairedDevices[bt->activeDevice.deviceIndex];
+        BC127CommandGetDeviceName(bt, dev);
         isNew = 1;
     }
     if (bt->activeDevice.deviceId == deviceId) {
+        // PBAP requires special handling
+        if (strcmp(msgBuf[3], "PBAP") == 0 && bt->pbap.active == 0) {
+            bt->pbap.active = 1;
+            bt->pbap.status = BT_PBAP_STATUS_IDLE;
+            EventTriggerCallback(BT_EVENT_PBAP_SESSION_STATUS, 0);
+        }
         uint8_t linkId = UtilsStrToInt(msgBuf[1]);
         BC127ConnectionOpenProfile(&bt->activeDevice, msgBuf[3], linkId);
         // Set the playback status
         if (strcmp(msgBuf[3], "AVRCP") == 0) {
-            if (strcmp(msgBuf[5], "PLAYING") == 0) {
-               bt->playbackStatus = BT_AVRCP_STATUS_PLAYING;
-            } else {
-                bt->playbackStatus = BT_AVRCP_STATUS_PAUSED;
+            if (
+                strcmp(msgBuf[5], "PLAYING") == 0 &&
+                bt->playbackStatus != BT_AVRCP_STATUS_PLAYING
+            ) {
+                bt->playbackStatus = BT_AVRCP_STATUS_PLAYING;
+                EventTriggerCallback(BT_EVENT_PLAYBACK_STATUS_CHANGE, 0);
             }
-            EventTriggerCallback(BT_EVENT_PLAYBACK_STATUS_CHANGE, 0);
+            if (
+                strcmp(msgBuf[5], "PAUSED") == 0 &&
+                bt->playbackStatus != BT_AVRCP_STATUS_PAUSED
+            ) {
+                bt->playbackStatus = BT_AVRCP_STATUS_PAUSED;
+                EventTriggerCallback(BT_EVENT_PLAYBACK_STATUS_CHANGE, 0);
+            }
         }
     }
     if (isNew == 1) {
         bt->status = BT_STATUS_CONNECTED;
         EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
+    }
+}
+
+/**
+ * BC127ProcessEventLinkLoss()
+ *     Description:
+ *         Process the LINK_LOSS events
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         char **msgBuf - The message buffer split into an array using spaces as the delimiter
+ *     Returns:
+ *         void
+ */
+void BC127ProcessEventLinkLoss(BT_t *bt, char **msgBuf)
+{
+    // Link was recovered
+    if (strcmp(msgBuf[2], "0") == 0) {
+        return;
+    }
+    if (bt->activeDevice.a2dpId == 0) {
+        // Consider this a dead link
+        uint8_t linkId = UtilsStrToInt(msgBuf[1]);
+        BC127CommandProfileClose(bt, linkId);
     }
 }
 
@@ -1534,10 +1719,27 @@ void BC127ProcessEventLink(BT_t *bt, char **msgBuf)
  */
 void BC127ProcessEventList(BT_t *bt, char **msgBuf)
 {
-    // Request the device name. Note that the name will only be returned
-    // if the device is in range
-    LogDebug(LOG_SOURCE_BT, "BT: Paired Device %s", msgBuf[1]);
-    BC127CommandGetDeviceName(bt, msgBuf[1]);
+    if (bt->pairedDevicesCheck == BT_LIST_STATUS_OFF) {
+        bt->pairedDevicesCheck = BT_LIST_STATUS_RUNNING;
+    }
+    if (bt->pairedDevicesCheck == BT_LIST_STATUS_RUNNING) {
+        bt->pairedDevicesFound++;
+    }
+    if (
+        bt->pairedDevicesCheck == BT_LIST_STATUS_RAN &&
+        bt->pairedDevicesFound != bt->pairedDevicesCount
+    ) {
+        uint8_t deviceIndex = (bt->pairedDevicesFound - bt->pairedDevicesCount) - 1;
+        uint8_t macId[BT_DEVICE_MAC_ID_LEN] = {0};
+        BC127ConvertMACIDToHex(msgBuf[1], macId);
+        BTPairedDeviceInit(bt, macId, deviceIndex);
+    }
+    if (
+        bt->pairedDevicesCheck == BT_LIST_STATUS_RAN &&
+        bt->pairedDevicesFound == bt->pairedDevicesCount
+    ) {
+        EventTriggerCallback(BT_EVENT_PAIRINGS_LOADED, 0);
+    }
 }
 
 /**
@@ -1566,23 +1768,81 @@ void BC127ProcessEventName(BT_t *bt, char **msgBuf, char *msg)
             }
         }
         deviceName[strIdx] = '\0';
-        char name[BT_DEVICE_NAME_LEN] = {0};
+        char name[BT_DEVICE_NAME_LEN + 1] = {0};
         UtilsNormalizeText(name, deviceName, BT_DEVICE_NAME_LEN);
         LogDebug(LOG_SOURCE_BT, "Process Name");
-        unsigned char macId[BT_MAC_ID_LEN] = {0};
+        unsigned char macId[BT_DEVICE_MAC_ID_LEN] = {0};
         BC127ConvertMACIDToHex(msgBuf[1], macId);
-        if (memcmp(macId, bt->activeDevice.macId, BT_MAC_ID_LEN) == 0 &&
-            bt->status != BT_STATUS_CONNECTED
-        ) {
-            // Clean the device name up
-            memset(bt->activeDevice.deviceName, 0, BT_DEVICE_NAME_LEN);
-            UtilsStrncpy(bt->activeDevice.deviceName, name, BT_DEVICE_NAME_LEN);
-            bt->status = BT_STATUS_CONNECTED;
-            EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
+        BTPairedDevice_t *dev = &bt->pairedDevices[bt->activeDevice.deviceIndex];
+        if (memcmp(macId, dev->macId, BT_DEVICE_MAC_ID_LEN) == 0) {
+            if (strcmp(dev->deviceName, name) != 0) {
+                memset(dev->deviceName, 0, BT_DEVICE_NAME_LEN);
+                UtilsStrncpy(dev->deviceName, name, BT_DEVICE_NAME_LEN);
+                BTPairedDeviceSave(macId, name, bt->activeDevice.deviceIndex);
+            }
+            if (bt->status != BT_STATUS_CONNECTED) {
+                bt->status = BT_STATUS_CONNECTED;
+                EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
+            }
         }
-        BTPairedDeviceInit(bt, macId, name, 0);
     } else {
         LogError("BT: Bad NAME Packet");
+    }
+}
+
+/**
+ * BC127ProcessEventOk()
+ *     Description:
+ *         Process the OK event
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         char **msgBuf - The message buffer split into an array using spaces as the delimiter
+ *     Returns:
+ *         void
+ */
+void BC127ProcessEventOk(BT_t *bt, char **msgBuf)
+{
+    // We will continue to get LIST events before we see another "OK"
+    // so we can use this to power the device count check state machine
+    if (bt->pairedDevicesCheck == BT_LIST_STATUS_RUNNING) {
+        bt->pairedDevicesCheck = BT_LIST_STATUS_RAN;
+        BC127CommandList(bt);
+        BC127CommandStatus(bt);
+    }
+    if (bt->pbap.status == BT_PBAP_STATUS_WAITING) {
+        // Flush any partial delimiter match into the line buffer
+        if (bt->pbap.parser.isDelim > 0) {
+            uint8_t j;
+            for (j = 0; j < bt->pbap.parser.isDelim; j++) {
+                if (bt->pbap.parser.bufferIdx < BT_PBAP_LINE_BUFFER_SIZE - 1) {
+                    bt->pbap.parser.buffer[bt->pbap.parser.bufferIdx++] =
+                        BC127_PBAP_DELIM[j];
+                }
+            }
+            bt->pbap.parser.isDelim = 0;
+        }
+        // Flush any residual data left in the parser buffer (e.g. END:VCARD)
+        if (bt->pbap.parser.bufferIdx > 0) {
+            bt->pbap.parser.buffer[bt->pbap.parser.bufferIdx] = '\0';
+            BTPBAPParseVCard(bt);
+            bt->pbap.parser.bufferIdx = 0;
+        }
+        bt->pbap.status = BT_PBAP_STATUS_IDLE;
+        LogDebug(
+            LOG_SOURCE_BT,
+            "BT: PBAP complete, %d contacts",
+            bt->pbap.contactCount
+        );
+        EventTriggerCallback(BT_EVENT_PBAP_CONTACT_RECEIVED, 0);
+    } else if (bt->pbap.status != BT_PBAP_STATUS_IDLE) {
+        bt->pbap.contactCount = 0;
+        bt->pbap.status = BT_PBAP_STATUS_IDLE;
+        LogDebug(
+            LOG_SOURCE_BT,
+            "BT: PBAP complete, %d contacts",
+            bt->pbap.contactCount
+        );
+        EventTriggerCallback(BT_EVENT_PBAP_CONTACT_RECEIVED, 0);
     }
 }
 
@@ -1599,7 +1859,16 @@ void BC127ProcessEventName(BT_t *bt, char **msgBuf, char *msg)
 void BC127ProcessEventOpenError(BT_t *bt, char **msgBuf)
 {
     if (strcmp(msgBuf[1], "A2DP") == 0) {
-        bt->pairingErrors[BC127_LINK_A2DP] = 1;
+        // A2DP is the first profile we open, so if there is an error opening
+        // it then we must assume there was a complete issue connecting to
+        // the given device
+        if (bt->status == BT_STATUS_CONNECTING) {
+            BTClearActiveDevice(bt);
+            bt->status = BT_STATUS_DISCONNECTED;
+            EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+        } else {
+            bt->pairingErrors[BC127_LINK_A2DP] = 1;
+        }
     }
     if (strcmp(msgBuf[1], "AVRCP") == 0) {
         bt->pairingErrors[BC127_LINK_AVRCP] = 1;
@@ -1629,17 +1898,23 @@ void BC127ProcessEventOpenOk(BT_t *bt, char **msgBuf)
 {
     uint8_t deviceId = BC127GetDeviceId(msgBuf[1]);
     uint8_t linkId = UtilsStrToInt(msgBuf[1]);
-    if (bt->activeDevice.deviceId != deviceId &&
+    if (
+        bt->activeDevice.deviceId != deviceId &&
         linkId != BC127_LINK_BLE
     ) {
-        bt->activeDevice.deviceId = deviceId;
-        BC127ConvertMACIDToHex(msgBuf[3], bt->activeDevice.macId);
-        char *deviceName = BTPairedDeviceGetName(bt, bt->activeDevice.macId);
-        if (deviceName != 0) {
-            UtilsStrncpy(bt->activeDevice.deviceName, deviceName, BT_DEVICE_NAME_LEN);
-        } else {
-            BC127CommandGetDeviceName(bt, msgBuf[3]);
+        BTClearActiveDevice(bt);
+        uint8_t macId[6] = {0};
+        BC127ConvertMACIDToHex(msgBuf[3], macId);
+        uint8_t deviceIndex = BTPairedDeviceFind(bt, macId);
+        if (deviceIndex == 0xFF) {
+            BTPairedDeviceInit(bt, macId, bt->pairedDevicesCount);
+            deviceIndex = BTPairedDeviceFind(bt, macId);
         }
+        bt->activeDevice.deviceIndex = deviceIndex;
+        bt->activeDevice.status = BT_DEVICE_STATUS_CONNECTED;
+        bt->activeDevice.deviceId = deviceId;
+        BTPairedDevice_t *dev = &bt->pairedDevices[bt->activeDevice.deviceIndex];
+        BC127CommandGetDeviceName(bt, dev);
         bt->status = BT_STATUS_CONNECTED;
         EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
     }
@@ -1666,11 +1941,97 @@ void BC127ProcessEventOpenOk(BT_t *bt, char **msgBuf)
         linkType = BT_LINK_TYPE_MAP;
         bt->pairingErrors[BC127_LINK_MAP] = 0;
     }
+    if (strcmp(msgBuf[2], "PBAP") == 0) {
+        bt->pairingErrors[BC127_LINK_PBAP] = 0;
+        linkType = BT_LINK_TYPE_PBAP;
+        bt->pbap.active = 1;
+        bt->pbap.status = BT_PBAP_STATUS_IDLE;
+        uint8_t status = 0;
+        EventTriggerCallback(BT_EVENT_PBAP_SESSION_STATUS, &status);
+    }
     LogDebug(LOG_SOURCE_BT, "BT: Open %s for ID %s", msgBuf[2], msgBuf[1]);
     EventTriggerCallback(
         BT_EVENT_DEVICE_LINK_CONNECTED,
         &linkType
     );
+}
+
+/**
+ * BC127ProcessProcessEventPBPull()
+ *     Description:
+ *         Handle PB_PULL vCard data directly from the ring buffer into the
+ *         parser, character by character.  This avoids allocating the entire
+ *         message on the stack (which can be >800 bytes for large pulls)
+ *         and drains the ring buffer quickly so the ISR has room to write
+ *         the next UART line.
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         char *msg - The string of characters in the queue
+ *         uint8_t hasHeader - If we need to
+ *     Returns:
+ *         void
+ */
+void BC127ProcessEventPBPull(BT_t *bt, char *msg, uint8_t hasHeader)
+{
+    uint16_t i = 0;
+    uint16_t messageLength = strlen(msg);
+    if (hasHeader) {
+        // Skip past "PB_PULL <linkId> <size> "
+        if (memcmp(msg, "PB_PULL", 7) == 0) {
+            uint8_t spaceCount = 0;
+            while (i < messageLength) {
+                i++;
+                if (msg[i] == ' ') {
+                    spaceCount++;
+                    if (spaceCount == 3) {
+                        // Advance past the space
+                        i++;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // Feed remaining bytes directly into the vCard parser
+    while (i < messageLength) {
+        uint8_t c = msg[i];
+        if (c == BC127_MSG_END_CHAR) {
+            continue;
+        }
+        BTPBAPParserState_t *parser = &bt->pbap.parser;
+        if (c == BC127_PBAP_DELIM[parser->isDelim]) {
+            parser->isDelim++;
+            if (parser->isDelim == 6) {
+                // Full delimiter matched: null-terminate and parse the line
+                parser->buffer[parser->bufferIdx] = '\0';
+                BTPBAPParseVCard(bt);
+                parser->bufferIdx = 0;
+                parser->isDelim = 0;
+            }
+        } else if (parser->isDelim > 0) {
+            // Partial match failed — flush the matched chars into the line buffer
+            uint8_t j;
+            for (j = 0; j < parser->isDelim; j++) {
+                if (parser->bufferIdx < BT_PBAP_LINE_BUFFER_SIZE - 1) {
+                    parser->buffer[parser->bufferIdx++] = BC127_PBAP_DELIM[j];
+                }
+            }
+            parser->isDelim = 0;
+            // Re-check the current char against the start of the delimiter
+            if (c == BC127_PBAP_DELIM[0]) {
+                parser->isDelim = 1;
+            } else {
+                if (parser->bufferIdx < BT_PBAP_LINE_BUFFER_SIZE - 1) {
+                    parser->buffer[parser->bufferIdx++] = c;
+                }
+            }
+        } else {
+            if (parser->bufferIdx < BT_PBAP_LINE_BUFFER_SIZE - 1) {
+                parser->buffer[parser->bufferIdx++] = c;
+            }
+        }
+        i++;
+    }
 }
 
 /**
@@ -1705,7 +2066,10 @@ void BC127ProcessEventState(BT_t *bt, char **msgBuf)
 {
     // Make sure the state is not "OFF", like when module first boots
     if (strcmp(msgBuf[1], "OFF") != 0) {
-        if (strcmp(msgBuf[1], "CONNECTED[0]") == 0) {
+        if (
+            strcmp(msgBuf[1], "CONNECTED[0]") == 0 &&
+            bt->status != BT_STATUS_CONNECTING
+        ) {
             bt->status = BT_STATUS_DISCONNECTED;
         }
         if (strcmp(msgBuf[2], "CONNECTABLE[ON]") == 0) {
@@ -1736,11 +2100,16 @@ void BC127ProcessEventState(BT_t *bt, char **msgBuf)
  */
 void BC127Process(BT_t *bt)
 {
+    uint16_t queueSize = CharQueueGetSize(&bt->uart.rxQueue);
     uint16_t messageLength = CharQueueSeek(&bt->uart.rxQueue, BC127_MSG_END_CHAR);
+    // Message length is a misnomer, really. This should be hasEOLChar, but
+    // contextually it makes more sense to keep it as messageLength due to
+    // the way its value is subsequently used
     if (messageLength > 0) {
         // We received a valid message, so set the power & state to on
         bt->powerState = BT_STATE_ON;
         char msg[messageLength];
+        memset(msg, 0, messageLength);
         uint16_t i;
         uint16_t delimCount = 1;
         for (i = 0; i < messageLength; i++) {
@@ -1751,13 +2120,10 @@ void BC127Process(BT_t *bt)
             if (c != BC127_MSG_END_CHAR) {
                 msg[i] = c;
             } else {
-                // The protocol states that 0x0D delimits messages,
-                // so we change it to a null terminator instead
+                // Convert to a string
                 msg[i] = '\0';
             }
         }
-        // Copy the message, since strtok adds a null terminator after the first
-        // occurence of the delimiter, causes issues with any functions used going forward
         char tmpMsg[messageLength];
         strcpy(tmpMsg, msg);
         char *msgBuf[delimCount];
@@ -1797,24 +2163,44 @@ void BC127Process(BT_t *bt)
             BC127ProcessEventCloseOk(bt, msgBuf);
         } else if (strcmp(msgBuf[0], "LINK") == 0) {
             BC127ProcessEventLink(bt, msgBuf);
+        } else if (strcmp(msgBuf[0], "LINK_LOSS") == 0) {
+            BC127ProcessEventLinkLoss(bt, msgBuf);
         } else if (strcmp(msgBuf[0], "LIST") == 0) {
             BC127ProcessEventList(bt, msgBuf);
         } else if (strcmp(msgBuf[0], "NAME") == 0) {
             BC127ProcessEventName(bt, msgBuf, msg);
+        } else if (strcmp(msgBuf[0], "OK") == 0) {
+            BC127ProcessEventOk(bt, msgBuf);
         } else if (strcmp(msgBuf[0], "OPEN_ERROR") == 0) {
             BC127ProcessEventOpenError(bt, msgBuf);
         } else if (strcmp(msgBuf[0], "OPEN_OK") == 0) {
             BC127ProcessEventOpenOk(bt, msgBuf);
+        } else if (strcmp(msgBuf[0], "PENDING") == 0) {
+            if (bt->pbap.status == BT_PBAP_STATUS_PENDING) {
+                bt->pbap.status = BT_PBAP_STATUS_HEADER_WAIT;
+            }
+        } else if (strcmp(msgBuf[0], "PB_PULL") == 0) {
+            bt->pbap.status = BT_PBAP_STATUS_WAITING;
+            BC127ProcessEventPBPull(bt, msg, 1);
         } else if (strcmp(msgBuf[0], "SCO_CLOSE") == 0) {
             BC127ProcessEventSCO(bt, (uint8_t)BT_CALL_SCO_CLOSE);
         } else if (strcmp(msgBuf[0], "SCO_OPEN") == 0) {
             BC127ProcessEventSCO(bt, (uint8_t)BT_CALL_SCO_OPEN);
         } else if (strcmp(msgBuf[0], "STATE") == 0) {
             BC127ProcessEventState(bt, msgBuf);
+        } else {
+            // Parse any partial data
+            if (bt->pbap.status == BT_PBAP_STATUS_WAITING) {
+                BC127ProcessEventPBPull(bt, msg, 0);
+                // We had a BC127_MSG_END_CHAR, so we should expect
+                // that the next message will have the header prepended
+                bt->pbap.status = BT_PBAP_STATUS_HEADER_WAIT;
+            }
         }
         // Reset the age of the Rx queue
         bt->rxQueueAge = 0;
-    } else if (CharQueueGetSize(&bt->uart.rxQueue) > 0) {
+    } else if (queueSize > 0) {
+        // Handle expiry of the RX queue as required
         if (bt->rxQueueAge == 0) {
             bt->rxQueueAge = TimerGetMillis();
         } else {
@@ -1822,7 +2208,68 @@ void BC127Process(BT_t *bt)
                 UARTRXQueueReset(&bt->uart);
                 bt->rxQueueAge = 0;
                 LogInfo(LOG_SOURCE_BT, "BT: RX Queue Timeout");
+                UARTReportErrors(&bt->uart);
+                return;
             }
+        }
+        // Important: We must stream PBAP data out of the UART ring buffer
+        // as it comes in so that it does not overflow
+        if (
+            bt->pbap.status == BT_PBAP_STATUS_IDLE ||
+            bt->pbap.status == BT_PBAP_STATUS_PENDING
+        ) {
+            UARTReportErrors(&bt->uart);
+            return;
+        }
+        uint16_t i = 0;
+        if (bt->pbap.status == BT_PBAP_STATUS_HEADER_WAIT) {
+            // Check for the header
+            uint8_t delimCount = 0;
+            uint8_t header[BC127_PBAP_CMD_LEN + 1] = {0};
+            for (i = 0; i < queueSize; i++) {
+                char c = CharQueueGetOffset(&bt->uart.rxQueue, i);
+                if (i < BC127_PBAP_CMD_LEN) {
+                    header[i] = c;
+                } else if (c == ' ') {
+                    delimCount++;
+                }
+                if (delimCount == 3) {
+                    i++;
+                    break;
+                }
+            }
+            if (
+                memcmp(header, "PB_PULL", 7) == 0 &&
+                delimCount == 3
+            ) {
+                // Remove the header
+                while (i > 0) {
+                    i--;
+                    CharQueueNext(&bt->uart.rxQueue);
+                }
+                bt->pbap.status = BT_PBAP_STATUS_WAITING;
+            }
+        }
+        if (bt->pbap.status == BT_PBAP_STATUS_WAITING) {
+            // Ensure we have the newest queue size
+            queueSize = CharQueueGetSize(&bt->uart.rxQueue);
+            char msg[queueSize + 1];
+            memset(&msg, 0, queueSize + 1);
+            for (i = 0; i < queueSize; i++) {
+                msg[i] = CharQueueNext(&bt->uart.rxQueue);
+                if (msg[i] == BC127_MSG_END_CHAR) {
+                    msg[i] = 0;
+                    bt->pbap.status = BT_PBAP_STATUS_HEADER_WAIT;
+                    break;
+                }
+            }
+            msg[i++] = '\0';
+            if (strlen(msg) > 0) {
+                // s = Streamed in
+                LogDebug(LOG_SOURCE_BT, "BT: R[s]: '%s'", msg);
+                BC127ProcessEventPBPull(bt, msg, 0);
+            }
+            bt->rxQueueAge = 0;
         }
     }
     UARTReportErrors(&bt->uart);
@@ -1909,7 +2356,8 @@ uint8_t BC127ConnectionCloseProfile(BTConnection_t *conn, char *profile)
         conn->pbapId = 0;
     }
     // Clear the connection once all the links are closed
-    if (conn->a2dpId == 0 &&
+    if (
+        conn->a2dpId == 0 &&
         conn->avrcpId == 0 &&
         conn->hfpId == 0 &&
         conn->bleId == 0 &&

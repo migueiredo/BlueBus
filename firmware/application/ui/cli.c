@@ -5,6 +5,21 @@
  *     Implement a CLI to pass commands to the device
  */
 #include "cli.h"
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include "../mappings.h"
+#include "../lib/bt/bt_bc127.h"
+#include "../lib/bt/bt_bm83.h"
+#include "../lib/bt.h"
+#include "../lib/char_queue.h"
+#include "../lib/config.h"
+#include "../lib/event.h"
+#include "../lib/i2c.h"
+#include "../lib/log.h"
+#include "../lib/timer.h"
+#include "../lib/utils.h"
 
 static CLI_t cli;
 
@@ -37,6 +52,145 @@ void CLIInit(UART_t *uart, BT_t *bt, IBus_t *ibus)
         &CLIEventBTBTMAddress,
         &cli
     );
+    EventRegisterCallback(
+        BT_EVENT_PBAP_CONTACT_RECEIVED,
+        &CLIEventPBAPContactReceived,
+        &cli
+    );
+    EventRegisterCallback(
+        UI_EVENT_CLI_WRITE_BEFORE,
+        &CLIEventWriteBefore,
+        &cli
+    );
+    EventRegisterCallback(
+        UI_EVENT_CLI_WRITE_COMPLETE,
+        &CLIEventWriteComplete,
+        &cli
+    );
+}
+
+/**
+ * CLIEventWriteBefore()
+ *     Description:
+ *         When a log event writes to the console, we need to erase the
+ *         users existing input
+ *     Params:
+ *         void *ctx - The content that we registered for this event
+ *         uint8_t *data - The event data
+ *     Returns:
+ *         void
+ */
+void CLIEventWriteBefore(void *ctx, unsigned char *data)
+{
+    CLI_t *context = (CLI_t *)ctx;
+    if (context->terminalReady != 2) {
+        return;
+    }
+    UARTSendString(context->uart, "\r\x1B[2K");
+}
+
+/**
+ * CLIEventWriteComplete()
+ *     Description:
+ *         On log write completion, we need to rewrite our current input
+ *         buffer to the console. This is so we do not overwrite the users
+ *         current input
+ *     Params:
+ *         void *ctx - The content that we registered for this event
+ *         uint8_t *data - The event data
+ *     Returns:
+ *         void
+ */
+void CLIEventWriteComplete(void *ctx, uint8_t *data)
+{
+    CLI_t *context = (CLI_t *)ctx;
+    if (context->terminalReady != 2) {
+        return;
+    }
+    UARTSendString(context->uart, "# ");
+    uint16_t cursor = context->uart->rxQueue.readCursor;
+    uint16_t end = context->uart->rxQueue.writeCursor;
+    while (cursor != end) {
+        uint8_t c = context->uart->rxQueue.data[cursor];
+        UARTSendChar(context->uart, c);
+        cursor++;
+        if (cursor >= CHAR_QUEUE_SIZE) {
+            cursor = 0;
+        }
+    }
+}
+
+/**
+ * CLIWrite()
+ *     Description:
+ *         Send the given text to the system UART. The key distinction from the
+ *         log API is that we do not trigger the write event
+ *     Params:
+ *         char *format - The string format
+ *         ... va_args - Parameters
+ *     Returns:
+ *         void
+ */
+void CLIWrite(const char *format, ...)
+{
+    UART_t *uart = UARTGetModuleHandler(SYSTEM_UART_MODULE);
+    if (uart != 0) {
+        char buffer[LOG_MESSAGE_SIZE] = {0};
+        va_list args;
+        va_start(args, format);
+        vsnprintf(buffer, LOG_MESSAGE_SIZE - 1, format, args);
+        va_end(args);
+        UARTSendString(uart, buffer);
+    }
+}
+
+/**
+ * CLIGetArgString()
+ *     Description:
+ *         Combine multiple arguments into a single string
+ *     Params:
+ *         char **msgBuf - The message buffer
+ *         uint8_t startIdx - The argument to start at
+ *         uint8_t argCount - The number of arguments in the buffer
+ *         char *string - The buffer to write the string into
+ *         uint8_t maxLen - The maximum length of the string
+ *     Returns:
+ *         uint8_t - 0 if the arguments did not fit in the given buffer
+ */
+static uint8_t CLIGetArgString(
+    char **msgBuf,
+    uint8_t startIdx,
+    uint8_t argCount,
+    char *string,
+    uint8_t maxLen
+) {
+    uint8_t strIdx = 0;
+    uint8_t idx = 0;
+    for (idx = startIdx; idx < argCount; idx++) {
+        if (msgBuf[idx] == 0) {
+            break;
+        }
+        // Re-add the space that was dropped when tokenized
+        if (strIdx > 0) {
+            if (strIdx >= maxLen) {
+                return 0;
+            }
+            string[strIdx++] = ' ';
+        }
+        uint8_t i = 0;
+        for (i = 0; msgBuf[idx][i] != '\0'; i++) {
+            char c = msgBuf[idx][i];
+            if (c < 0x20 || c > 0x7E) {
+                continue;
+            }
+            if (strIdx >= maxLen) {
+                return 0;
+            }
+            string[strIdx++] = c;
+        }
+    }
+    string[strIdx] = '\0';
+    return 1;
 }
 
 /**
@@ -74,9 +228,9 @@ void CLICommandBTBC127(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
     } else if (UtilsStricmp(msgBuf[1], "HFP") == 0) {
         if (delimCount == 2) {
             if (ConfigGetSetting(CONFIG_SETTING_HFP) == CONFIG_SETTING_ON) {
-                LogRaw("HFP: On\r\n");
+                CLIWrite("HFP: On\r\n");
             } else {
-                LogRaw("HFP: Off\r\n");
+                CLIWrite("HFP: Off\r\n");
             }
         } else {
             if (UtilsStricmp(msgBuf[2], "ON") == 0) {
@@ -106,29 +260,20 @@ void CLICommandBTBC127(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
             UtilsStricmp(msgBuf[2], "CVC") == 0 ||
             UtilsStricmp(msgBuf[2], "APTX") == 0)
         ) {
-            char license[25];
-            memset(license, 0, 25);
-            snprintf(
-                license,
-                25,
-                "%s %s %s %s %s",
-                msgBuf[3],
-                msgBuf[4],
-                msgBuf[5],
-                msgBuf[6],
-                msgBuf[7]
-            );
-            BC127CommandLicense(cli.bt, msgBuf[2], license);
-            *cmdSuccess = 1;
+            char license[25] = {0};
+            if (CLIGetArgString(msgBuf, 3, delimCount, license, 24) != 0) {
+                BC127CommandLicense(cli.bt, msgBuf[2], license);
+                *cmdSuccess = 1;
+            }
         }
     } else if (UtilsStricmp(msgBuf[1], "MGAIN") == 0) {
         if (delimCount == 2) {
             uint8_t micGain = ConfigGetSetting(CONFIG_SETTING_MIC_GAIN);
-            LogRaw("BT Mic Gain Set to: %02X\r\n", micGain);
+            CLIWrite("BT Mic Gain Set to: %02X\r\n", micGain);
         } else {
             uint8_t micGain = UtilsStrToHex(msgBuf[2]);
             if (micGain < 0xC0 || micGain > 0xD6) {
-                LogRaw("Mic Gain '%02X' out of range: C0 - D6\r\n", micGain);
+                CLIWrite("Mic Gain '%02X' out of range: C0 - D6\r\n", micGain);
             } else {
                 // Store it as a smaller value
                 micGain = micGain - 0xC0;
@@ -145,7 +290,7 @@ void CLICommandBTBC127(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
         }
     } else if (UtilsStricmp(msgBuf[1], "MBIAS") == 0) {
         if (delimCount == 2) {
-            LogRaw("Set the Mic Bias Generator");
+            CLIWrite("Set the Mic Bias Generator");
         } else {
             uint8_t micGain = ConfigGetSetting(CONFIG_SETTING_MIC_GAIN);
             uint8_t micPreamp = ConfigGetSetting(CONFIG_SETTING_MIC_PREAMP);
@@ -161,7 +306,7 @@ void CLICommandBTBC127(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
         }
     } else if (UtilsStricmp(msgBuf[1], "MPREAMP") == 0) {
         if (delimCount == 2) {
-            LogRaw("Set the Mic Pre-Amp");
+            CLIWrite("Set the Mic Pre-Amp");
         } else {
             uint8_t micGain = ConfigGetSetting(CONFIG_SETTING_MIC_GAIN);
             uint8_t micBias = ConfigGetSetting(CONFIG_SETTING_MIC_BIAS);
@@ -181,40 +326,13 @@ void CLICommandBTBC127(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
         BC127CommandBtState(cli.bt, BT_STATE_ON, BT_STATE_ON);
     } else if (UtilsStricmp(msgBuf[1], "UNPAIR") == 0) {
         BC127CommandUnpair(cli.bt);
-        ConfigSetSetting(CONFIG_SETTING_LAST_CONNECTED_DEVICE_MAC,0x00);
     } else if (UtilsStricmp(msgBuf[1], "NAME") == 0) {
-        char nameBuf[33];
-        memset(nameBuf, 0, 33);
-        uint8_t wordLength = delimCount - 2;
-        uint8_t wordCounter = 2;
-        while (wordLength != 0) {
-            uint8_t wordStrLen = strlen(msgBuf[wordCounter]);
-            uint8_t nameStrLen = strlen(nameBuf);
-            if (nameStrLen + wordStrLen <= 32) {
-                uint8_t i = 0;
-                for (i = 0; i < wordStrLen; i++) {
-                    nameBuf[nameStrLen + i] = msgBuf[wordCounter][i];
-                }
-            } else {
-                wordLength = 0;
-                *cmdSuccess = 0;
-            }
-            wordLength--;
-            wordCounter++;
-            if (*cmdSuccess != 0 && wordLength != 0) {
-                nameStrLen = strlen(nameBuf);
-                // Ensure we do not overflow the buffer
-                if (nameStrLen <= 32) {
-                    // Add the space we will have taken away
-                    nameBuf[nameStrLen] = ' ';
-                }
-            }
-        }
-        if (*cmdSuccess != 0) {
+        char nameBuf[33] = {0};
+        if (CLIGetArgString(msgBuf, 2, delimCount, nameBuf, 32) == 0) {
+            *cmdSuccess = 0;
+        } else {
             BC127CommandSetModuleName(cli.bt, nameBuf);
         }
-    } else if (UtilsStricmp(msgBuf[1], "PBAP") == 0) {
-        BC127SendCommand(cli.bt, "PB_PULL 16 3 1 5 0 87");
     } else if (UtilsStricmp(msgBuf[1], "VERSION") == 0) {
         BC127CommandVersion(cli.bt);
     } else {
@@ -277,14 +395,43 @@ void CLICommandBTBM83(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
         BM83CommandPairingEnable(cli.bt);
     } else if (UtilsStricmp(msgBuf[1], "MACID") == 0) {
         BM83CommandReadLocalBDAddress(cli.bt);
+    } else if (UtilsStricmp(msgBuf[1], "NAME") == 0) {
+        char deviceName[CONFIG_STRING_BT_DEVICE_NAME_LEN + 1] = {0};
+        if (CLIGetArgString(
+                msgBuf,
+                2,
+                delimCount,
+                deviceName,
+                CONFIG_STRING_BT_DEVICE_NAME_LEN
+            ) == 0
+        ) {
+            CLIWrite(
+                "BT Name must be %d characters or less\r\n",
+                CONFIG_STRING_BT_DEVICE_NAME_LEN
+            );
+            *cmdSuccess = 0;
+        } else if (strlen(deviceName) == 0) {
+            ConfigGetBTDeviceName(deviceName);
+            if (strlen(deviceName) == 0) {
+                CLIWrite("BT Name: BlueBus\r\n");
+            } else {
+                CLIWrite("BT Name: %s\r\n", deviceName);
+            }
+            BM83CommandReadLocalDeviceName(cli.bt);
+        } else {
+            ConfigSetBTDeviceName(deviceName);
+            BM83CommandSetLocalDeviceName(cli.bt, deviceName);
+            BM83CommandChangeDeviceName(cli.bt, deviceName);
+            CLIWrite("BT Name set to: %s\r\n", deviceName);
+        }
     } else if (UtilsStricmp(msgBuf[1], "MGAIN") == 0) {
         uint8_t currentMicGain = ConfigGetSetting(CONFIG_SETTING_MIC_GAIN);
         if (delimCount == 2) {
-            LogRaw("BT Mic Gain Set to: %02X\r\n", currentMicGain);
+            CLIWrite("BT Mic Gain Set to: %02X\r\n", currentMicGain);
         } else {
             uint8_t micGain = UtilsStrToHex(msgBuf[2]);
             if (micGain <= 0 || micGain > 0x0F) {
-                LogRaw("Mic Gain '%02X' out of range: 0 - 16\r\n", micGain);
+                CLIWrite("Mic Gain '%02X' out of range: 0 - 16\r\n", micGain);
             } else {
                 ConfigSetSetting(CONFIG_SETTING_MIC_GAIN, micGain);
                 int8_t offset = currentMicGain - micGain;
@@ -332,7 +479,8 @@ void CLICommandBTBM83(char **msgBuf, uint8_t *cmdSuccess, uint8_t delimCount)
  */
 void CLIEventBTBTMAddress(void *ctx, uint8_t *data)
 {
-    LogRaw(
+    EventTriggerCallback(UI_EVENT_CLI_WRITE_BEFORE, 0);
+    CLIWrite(
         "BT Address: %02X%02X%02X%02X%02X%02X\r\n",
         data[0],
         data[1],
@@ -341,6 +489,49 @@ void CLIEventBTBTMAddress(void *ctx, uint8_t *data)
         data[4],
         data[5]
     );
+    EventTriggerCallback(UI_EVENT_CLI_WRITE_COMPLETE, 0);
+}
+
+/**
+ * CLIEventPBAPContactReceived()
+ *     Description:
+ *         Handle PBAP contact search results
+ *     Params:
+ *         void *ctx - The context provided at registration
+ *         uint8_t *data - Any event data
+ *     Returns:
+ *         void
+ */
+void CLIEventPBAPContactReceived(void *ctx, uint8_t *data)
+{
+    CLI_t *cli = (CLI_t *)ctx;
+    if (cli->terminalReady == 1) {
+        return;
+    }
+    EventTriggerCallback(UI_EVENT_CLI_WRITE_BEFORE, 0);
+    if (cli->bt->pbap.contactCount == 0) {
+        CLIWrite("No contacts found.\r\n");
+        EventTriggerCallback(UI_EVENT_CLI_WRITE_COMPLETE, 0);
+        return;
+    }
+    CLIWrite("Contacts(%d):\r\n", cli->bt->pbap.contactCount);
+    uint8_t i;
+    for (i = 0; i < cli->bt->pbap.contactCount; i++) {
+        BTPBAPContact_t *contact = &cli->bt->pbap.contacts[i];
+        CLIWrite("%s:", contact->name);
+        uint8_t j;
+        for (j = 0; j < contact->numberCount; j++) {
+            char phoneNumber[16];
+            BTPBAPTelephoneFromBCD(
+                contact->numbers[j].number,
+                phoneNumber,
+                sizeof(phoneNumber)
+            );
+            CLIWrite(" '%s'", phoneNumber);
+        }
+        CLIWrite("\r\n");
+    }
+    EventTriggerCallback(UI_EVENT_CLI_WRITE_COMPLETE, 0);
 }
 
 /**
@@ -420,6 +611,7 @@ void CLIProcess()
             char tmpMsg[messageLength];
             strcpy(tmpMsg, msg);
             char *msgBuf[delimCount];
+            memset(msgBuf, 0, sizeof(msgBuf));
             char *p = strtok(tmpMsg, " ");
             i = 0;
             while (p != 0x00) {
@@ -427,7 +619,7 @@ void CLIProcess()
                 p = strtok(0x00, " ");
             }
             if (UtilsStricmp(msgBuf[0], "BOOTLOADER") == 0) {
-                LogRaw("Rebooting into bootloader\r\n");
+                CLIWrite("Rebooting into bootloader\r\n");
                 uint32_t now = TimerGetMillis();
                 // Wait 15ms before going into the bootloader
                 // so our message debug goes through to the CLI
@@ -443,7 +635,7 @@ void CLIProcess()
                             BM83CommandVendorATCommand(cli.bt, msgBuf[2]);
                         }
                     } else {
-                        LogRaw("Wrong number of arguments for BT AT\r\n");
+                        CLIWrite("Wrong number of arguments for BT AT\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "DIAL") == 0) {
                     if (delimCount >= 4) {
@@ -451,12 +643,28 @@ void CLIProcess()
                     } else if (delimCount == 3) {
                         BTCommandDial(cli.bt, msgBuf[2], 0);
                     } else {
-                        LogRaw("Wrong number of arguments for BT CALL\r\n");
+                        CLIWrite("Wrong number of arguments for BT CALL\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "REDIAL") == 0) {
                     BTCommandDial(cli.bt, cli.bt->dialBuffer, 0);
                 } else if (UtilsStricmp(msgBuf[1], "REDIAL_PHONE") == 0) {
                     BTCommandRedial(cli.bt);
+                } else if (UtilsStricmp(msgBuf[1], "PBOPEN") == 0) {
+                    BTCommandPBAPOpen(cli.bt);
+                } else if (UtilsStricmp(msgBuf[1], "PBCLOSE") == 0) {
+                    BTCommandPBAPClose(cli.bt);
+                } else if (UtilsStricmp(msgBuf[1], "PBGET") == 0) {
+                    if (delimCount >= 3) {
+                        if (cli.bt->pbap.active) {
+                            uint16_t offset = UtilsStrToInt(msgBuf[2]);
+                            BTCommandPBAPGetPhonebook(cli.bt, BT_PBAP_OBJ_PHONEBOOK, offset, BT_PBAP_MAX_CONTACTS);
+                        } else {
+                            CLIWrite("PBAP session not open. Use BT PBOPEN first.\r\n");
+                            cmdSuccess = 0;
+                        }
+                    } else {
+                        cmdSuccess = 0;
+                    }
                 } else if (cli.bt->type == BT_BTM_TYPE_BC127) {
                     CLICommandBTBC127(msgBuf, &cmdSuccess, delimCount);
                 } else {
@@ -469,7 +677,7 @@ void CLIProcess()
                         byte <= CONFIG_SETTING_END_ADDRESS
                     ) {
                         uint8_t value = ConfigGetSetting(byte);
-                        LogRaw("Byte 0x%02X = 0x%02X\r\n", byte, value);
+                        CLIWrite("Byte 0x%02X = 0x%02X\r\n", byte, value);
                     } else {
                         cmdSuccess = 0;
                     }
@@ -480,38 +688,56 @@ void CLIProcess()
                     IBusCommandDIAGetIdentity(cli.ibus, IBUS_DEVICE_LCM);
                 } else if (UtilsStricmp(msgBuf[1], "ERR") == 0) {
                     // Errors
-                    LogRaw("Trap Counts: \r\n");
-                    LogRaw("    Oscilator Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_OSC));
-                    LogRaw("    Address Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_ADDR));
-                    LogRaw("    Stack Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_STACK));
-                    LogRaw("    Math Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_MATH));
-                    LogRaw("    NVM Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_NVM));
-                    LogRaw("    General Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_GEN));
-                    LogRaw("    Last Trap: %02x\r\n", ConfigGetTrapLast());
-                    LogRaw("BC127 Boot Failures: %u\r\n", ConfigGetBC127BootFailures());
+                    CLIWrite("Trap Counts: \r\n");
+                    CLIWrite("    Oscilator Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_OSC));
+                    CLIWrite("    Address Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_ADDR));
+                    CLIWrite("    Stack Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_STACK));
+                    CLIWrite("    Math Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_MATH));
+                    CLIWrite("    NVM Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_NVM));
+                    CLIWrite("    General Failures: %d\r\n", ConfigGetTrapCount(CONFIG_TRAP_GEN));
+                    CLIWrite("    Last Trap: %02x\r\n", ConfigGetTrapLast());
+                    uint8_t porReason = ConfigGetSetting(CONFIG_POR_REASON);
+                    char *porReasonStr = "None";
+                    if (porReason == CONFIG_POR_REASON_TRAP) {
+                        porReasonStr = "Trap Conflict";
+                    } else if (porReason == CONFIG_POR_REASON_ILLEGAL_OP) {
+                        porReasonStr = "Illegal Opcode / Uninitialized W";
+                    } else if (porReason == CONFIG_POR_REASON_CFG_MISMATCH) {
+                        porReasonStr = "Configuration Mismatch";
+                    } else if (porReason == CONFIG_POR_REASON_MCLR) {
+                        porReasonStr = "External (MCLR)";
+                    } else if (porReason == CONFIG_POR_REASON_WDT) {
+                        porReasonStr = "Watchdog Timeout";
+                    } else if (porReason == CONFIG_POR_REASON_BROWNOUT) {
+                        porReasonStr = "Brown-out";
+                    }
+                    CLIWrite("Last Unexpected Reset Reason: %s\r\n", porReasonStr);
+                    CLIWrite("BC127 Boot Failures: %u\r\n", ConfigGetBC127BootFailures());
                 } else if (UtilsStricmp(msgBuf[1], "UI") == 0) {
                     uint8_t uiMode = ConfigGetUIMode();
                     if (uiMode == CONFIG_UI_CD53) {
-                        LogRaw("UI Mode: CD53\r\n");
+                        CLIWrite("UI Mode: CD53\r\n");
                     } else if (uiMode == CONFIG_UI_BMBT) {
-                        LogRaw("UI Mode: Navigation\r\n");
+                        CLIWrite("UI Mode: Navigation\r\n");
                     } else if (uiMode == CONFIG_UI_MID) {
-                        LogRaw("UI Mode: MID\r\n");
+                        CLIWrite("UI Mode: MID\r\n");
                     } else if (uiMode == CONFIG_UI_MID_BMBT) {
-                        LogRaw("UI Mode: MID / Navigation\r\n");
+                        CLIWrite("UI Mode: MID / Navigation\r\n");
                     } else if (uiMode == CONFIG_UI_MIR) {
-                        LogRaw("UI Mode: Business Navigation (MIR)\r\n");
+                        CLIWrite("UI Mode: Business Navigation (MIR)\r\n");
+                    } else if (uiMode == CONFIG_UI_IRIS) {
+                        CLIWrite("UI Mode: IRIS (Integrated Radio Information System)\r\n");
                     } else {
-                        LogRaw("UI Mode: Not set or Invalid\r\n");
+                        CLIWrite("UI Mode: Not set or Invalid\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "DAC") == 0) {
                     int8_t status;
                     uint8_t buffer;
                     status = I2CRead(0x4C, 0x5E, &buffer);
-                    LogRaw("PCM5122: I2SSTAT %02X (0x5E) [%d]\r\n", buffer, status);
+                    CLIWrite("PCM5122: I2SSTAT %02X (0x5E) [%d]\r\n", buffer, status);
                     status = I2CRead(0x4C, 0x76, &buffer);
-                    LogRaw("PCM5122: PWRSTAT %02X (0x76) [%d]\r\n", buffer, status);
-                    LogRaw("PCM5122: Volume configured to %02X\r\n", ConfigGetSetting(CONFIG_SETTING_DAC_AUDIO_VOL));
+                    CLIWrite("PCM5122: PWRSTAT %02X (0x76) [%d]\r\n", buffer, status);
+                    CLIWrite("PCM5122: Volume configured to %02X\r\n", ConfigGetSetting(CONFIG_SETTING_DAC_AUDIO_VOL));
                 } else if (UtilsStricmp(msgBuf[1], "I2S") == 0) {
                     int8_t status;
                     uint8_t buffer;
@@ -521,29 +747,29 @@ void CLIProcess()
                     I2CRead(0x3A, 0x00, &version2);
                     I2CRead(0x3A, 0x01, &version);
                     I2CRead(0x3A, 0x02, &rev);
-                    LogRaw("WM8804: DeviceID: %02X%02X Rev: %d\r\n", version, version2, rev);
+                    CLIWrite("WM8804: DeviceID: %02X%02X Rev: %d\r\n", version, version2, rev);
                     status = I2CRead(0x3A, 0x0C, &buffer);
-                    LogRaw("WM8804: SPDSTAT %02X (0x0C) [%d]\r\n", buffer, status);
+                    CLIWrite("WM8804: SPDSTAT %02X (0x0C) [%d]\r\n", buffer, status);
                     status = I2CRead(0x3A, 0x0B, &buffer);
-                    LogRaw("WM8804: INTSTAT %02X (0x0B) [%d]\r\n", buffer, status);
+                    CLIWrite("WM8804: INTSTAT %02X (0x0B) [%d]\r\n", buffer, status);
                 } else if (UtilsStricmp(msgBuf[1], "PWROFF") == 0) {
                     if (ConfigGetSetting(CONFIG_SETTING_AUTO_POWEROFF) == CONFIG_SETTING_ON) {
-                        LogRaw("Auto-Power Off: On\r\n");
+                        CLIWrite("Auto-Power Off: On\r\n");
                     } else {
-                        LogRaw("Auto-Power Off: Off\r\n");
+                        CLIWrite("Auto-Power Off: Off\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "SELFPLAY") == 0) {
                     if (ConfigGetSetting(CONFIG_SETTING_SELF_PLAY) == CONFIG_SETTING_ON) {
-                        LogRaw("Self Play: On\r\n");
+                        CLIWrite("Self Play: On\r\n");
                     } else {
-                        LogRaw("Self Play: Off\r\n");
+                        CLIWrite("Self Play: Off\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "VIN") == 0) {
                     // Get VIN
                     uint8_t currentVehicleId[5] = {};
                     ConfigGetVehicleIdentity(currentVehicleId);
                     char currentVinTwo[] = {currentVehicleId[0], currentVehicleId[1], '\0'};
-                    LogRaw(
+                    CLIWrite(
                         "Vehicle VIN: %s%d%d%d%d%d\r\n",
                         currentVinTwo,
                         (currentVehicleId[2] >> 4) & 0xF,
@@ -569,7 +795,10 @@ void CLIProcess()
                     cmdSuccess = 0;
                 }
             } else if (UtilsStricmp(msgBuf[0], "SEND") == 0) {
-                if (UtilsStricmp(msgBuf[1], "IBUS") == 0) {
+                if (
+                    UtilsStricmp(msgBuf[1], "IBUS") == 0 &&
+                    delimCount >= 5
+                ) {
                     uint8_t idx = 2;
                     uint8_t message[delimCount - 4];
                     uint8_t src = 0x00;
@@ -591,6 +820,8 @@ void CLIProcess()
                     if (size > 0) {
                         IBusSendCommand(cli.ibus, src, dst, message, size);
                     }
+                } else {
+                    cmdSuccess = 0;
                 }
             } else if (UtilsStricmp(msgBuf[0], "SET") == 0) {
                 if (UtilsStricmp(msgBuf[1], "BYTE") == 0 && delimCount == 4) {
@@ -682,15 +913,25 @@ void CLIProcess()
                         // Force static GT UI mode
                         ConfigSetUIMode(CONFIG_UI_BMBT);
                         ConfigSetNavType(IBUS_GT_MKIV_STATIC);
+                    } else if (UtilsStricmp(msgBuf[2], "7") == 0) {
+                        ConfigSetUIMode(CONFIG_UI_IRIS);
                     } else {
-                        LogRaw("Invalid UI Mode specified\r\n");
+                        CLIWrite("Invalid UI Mode specified\r\n");
+                    }
+                } else if (UtilsStricmp(msgBuf[1], "HEADLESS") == 0) {
+                    if (UtilsStricmp(msgBuf[2], "ON") == 0) {
+                        ConfigSetSetting(CONFIG_SETTING_HEADLESS, CONFIG_SETTING_ON);
+                    } else if (UtilsStricmp(msgBuf[2], "OFF") == 0) {
+                        ConfigSetSetting(CONFIG_SETTING_HEADLESS, CONFIG_SETTING_OFF);
+                    } else {
+                        cmdSuccess = 0;
                     }
                 } else if (UtilsStricmp(msgBuf[1], "IGN") == 0) {
                     if (UtilsStricmp(msgBuf[2], "OFF") == 0) {
                         uint8_t ignitionStatus = 0x00;
                         IBusCommandIKESetIgnitionStatus(cli.ibus, ignitionStatus);
                         EventTriggerCallback(
-                            IBUS_EVENT_IKEIgnitionStatus,
+                            IBUS_EVENT_IKE_IGNITION_STATUS,
                             (uint8_t *)&ignitionStatus
                         );
                         cli.ibus->cdChangerFunction = IBUS_CDC_FUNC_NOT_PLAYING;
@@ -699,7 +940,7 @@ void CLIProcess()
                         uint8_t ignitionStatus = 0x01;
                         IBusCommandIKESetIgnitionStatus(cli.ibus, ignitionStatus);
                         EventTriggerCallback(
-                            IBUS_EVENT_IKEIgnitionStatus,
+                            IBUS_EVENT_IKE_IGNITION_STATUS,
                             (uint8_t *)&ignitionStatus
                         );
                         cli.ibus->cdChangerFunction = IBUS_CDC_FUNC_PLAYING;
@@ -712,6 +953,20 @@ void CLIProcess()
                         } else {
                             cmdSuccess = 0;
                         }
+                    } else {
+                        cmdSuccess = 0;
+                    }
+                } else if (UtilsStricmp(msgBuf[1], "LMPOLL") == 0) {
+                    if (UtilsStricmp(msgBuf[2], "OFF") == 0) {
+                        ConfigSetSetting(
+                            CONFIG_SETTING_LM_IO_POLL_DISABLED,
+                            CONFIG_SETTING_ON
+                        );
+                    } else if (UtilsStricmp(msgBuf[2], "ON") == 0) {
+                        ConfigSetSetting(
+                            CONFIG_SETTING_LM_IO_POLL_DISABLED,
+                            CONFIG_SETTING_OFF
+                        );
                     } else {
                         cmdSuccess = 0;
                     }
@@ -737,7 +992,7 @@ void CLIProcess()
                     if (system != 0xFF && value != 0xFF) {
                         ConfigSetLog(system, value);
                     } else {
-                        LogRaw("Invalid Parameters for SET LOG\r\n");
+                        CLIWrite("Invalid Parameters for SET LOG\r\n");
                     }
                 } else if (UtilsStricmp(msgBuf[1], "PWROFF") == 0) {
                     if (UtilsStricmp(msgBuf[2], "ON") == 0) {
@@ -795,7 +1050,7 @@ void CLIProcess()
                     );
                     BC127CommandSetBtVolConfig(cli.bt, 15, 100, 10, 1);
                     BC127CommandSetProfiles(cli.bt, 1, 1, 1, 1);
-                    BC127CommandSetBtState(cli.bt, 2, 2);
+                    BC127CommandSetBtState(cli.bt, BT_STATE_OFF, BT_STATE_OFF);
                     BC127CommandSetCodec(cli.bt, 1, "OFF");
                     BC127CommandSetMetadata(cli.bt, 1);
                     BC127CommandSetModuleName(cli.bt, "BlueBus");
@@ -804,11 +1059,12 @@ void CLIProcess()
                     BC127CommandWrite(cli.bt);
                     // Set the Mic Gain to -23dB by default
                     micGain = 0x01;
-                    ConfigSetSetting(CONFIG_SETTING_LAST_CONNECTED_DEVICE_MAC, 0x00);
                 } else {
                     BM83CommandRestore(cli.bt);
+                    BM83CommandRestoreDefaultDeviceName(cli.bt);
+                    ConfigSetBTDeviceName("");
+                    BTPairedDeviceClearRecords();
                     ConfigSetSetting(CONFIG_SETTING_LAST_CONNECTED_DEVICE, 0x00);
-                    ConfigSetSetting(CONFIG_SETTING_LAST_CONNECTED_DEVICE_MAC, 0x00);
                     micGain = 0x00;
                 }
                 // Reset the UI
@@ -835,94 +1091,98 @@ void CLIProcess()
                 ConfigSetSetting(CONFIG_SETTING_MIC_BIAS, CONFIG_SETTING_ON);
                 ConfigSetSetting(CONFIG_SETTING_MIC_GAIN, micGain);
             } else if (UtilsStricmp(msgBuf[0], "TEST") == 0) {
-                int8_t status = 0x00;
                 uint8_t buffer = 0x00;
-                status = I2CRead(0x4C, 0x76, &buffer);
+                I2CRead(0x4C, 0x76, &buffer);
                 if (buffer == 0x85) {
-                    LogRaw("DAC: OK\r\n");
+                    CLIWrite("DAC: OK\r\n");
                 } else {
-                    LogRaw("DAC: FAIL\r\n");
+                    CLIWrite("DAC: FAIL\r\n");
                 }
                 BM83CommandReadLocalBDAddress(cli.bt);
             } else if (UtilsStricmp(msgBuf[0], "VERSION") == 0) {
-                char version[9];
+                char version[9] = {0};
                 ConfigGetFirmwareVersionString(version);
-                LogRaw("BlueBus Firmware: %s\r\n", version);
-                LogRaw("Serial Number: %u\r\n", ConfigGetSerialNumber());
-                LogRaw("Build Date: %d/%d\r\n", ConfigGetBuildWeek(), ConfigGetBuildYear());
-                LogRaw("Hardware Revision: %d\r\n", BOARD_VERSION_STATUS + 1);
+                CLIWrite("BlueBus Firmware: %s\r\n", version);
+                CLIWrite("Serial Number: %u\r\n", ConfigGetSerialNumber());
+                CLIWrite("Build Date: %d/%d\r\n", ConfigGetBuildWeek(), ConfigGetBuildYear());
+                CLIWrite("Hardware Revision: %d\r\n", BOARD_VERSION_STATUS + 1);
             } else if (UtilsStricmp(msgBuf[0], "HELP") == 0 || UtilsStricmp(msgBuf[0], "?") == 0) {
-                LogRaw("Available Commands:\r\n");
-                LogRaw("    BOOTLOADER - Reboot into the bootloader immediately\r\n");
+                CLIWrite("Available Commands:\r\n");
+                CLIWrite("    BOOTLOADER - Reboot into the bootloader immediately\r\n");
                 if (cli.bt->type == BT_BTM_TYPE_BC127) {
-                    LogRaw("    BT CONFIG - Get the BC127 Configuration\r\n");
-                    LogRaw("    BT CVC ON/OFF - Enable or Disable Clear Voice Capture\r\n");
-                    LogRaw("    BT HFP ON/OFF - Enable or Disable HFP. Get the HFP Status without a param.\r\n");
-                    LogRaw("    BT MGAIN x - Set the Mic gain to x where x is octal C0-D6\r\n");
-                    LogRaw("    BT MPREAMP ON/OFF - Enable the microphone pre-amp so non-OE microphones work well\r\n");
-                    LogRaw("    BT PAIR - Enable pairing mode\r\n");
-                    LogRaw("    BT NAME <name> - Set the module name, up to 32 chars\r\n");
-                    LogRaw("    BT REBOOT - Reboot the BC127\r\n");
-                    LogRaw("    BT UNPAIR - Unpair all devices from the BC127\r\n");
-                    LogRaw("    BT VERSION - Get the BC127 Version Info\r\n");
+                    CLIWrite("    BT CONFIG - Get the BC127 Configuration\r\n");
+                    CLIWrite("    BT CVC ON/OFF - Enable or Disable Clear Voice Capture\r\n");
+                    CLIWrite("    BT HFP ON/OFF - Enable or Disable HFP. Get the HFP Status without a param.\r\n");
+                    CLIWrite("    BT MGAIN x - Set the Mic gain to x where x is octal C0-D6\r\n");
+                    CLIWrite("    BT MPREAMP ON/OFF - Enable the microphone pre-amp so non-OE microphones work well\r\n");
+                    CLIWrite("    BT PAIR - Enable pairing mode\r\n");
+                    CLIWrite("    BT NAME <name> - Set the module name, up to 32 chars\r\n");
+                    CLIWrite("    BT REBOOT - Reboot the BC127\r\n");
+                    CLIWrite("    BT UNPAIR - Unpair all devices from the BC127\r\n");
+                    CLIWrite("    BT VERSION - Get the BC127 Version Info\r\n");
                 } else {
-                    LogRaw("    BT CONN - Initiate a connection to the last device\r\n");
-                    LogRaw("    BT LIST - Query the BM83 for the paired device list\r\n");
-                    LogRaw("    BT PAIR - Enter Pairing Mode\r\n");
-                    LogRaw("    BT MACID - Query the BM83 for the MAC Address\r\n");
-                    LogRaw("    BT BLE - Enter BLE Mode\r\n");
-                    LogRaw("    BT PLAY - Send the AVRCP Play Command\r\n");
-                    LogRaw("    BT PAUSE - Send the AVRCP Pause Command\r\n");
-                    LogRaw("    BT RESTORE - Reset the BM83\r\n");
+                    CLIWrite("    BT CONN - Initiate a connection to the last device\r\n");
+                    CLIWrite("    BT LIST - Query the BM83 for the paired device list\r\n");
+                    CLIWrite("    BT PAIR - Enter Pairing Mode\r\n");
+                    CLIWrite("    BT MACID - Query the BM83 for the MAC Address\r\n");
+                    CLIWrite("    BT NAME <name> - Set the Bluetooth name, up to 23 chars. Display the name, when run without params\r\n");
+                    CLIWrite("    BT BLE - Enter BLE Mode\r\n");
+                    CLIWrite("    BT PLAY - Send the AVRCP Play Command\r\n");
+                    CLIWrite("    BT PAUSE - Send the AVRCP Pause Command\r\n");
+                    CLIWrite("    BT RESTORE - Reset the BM83\r\n");
                 }
-                LogRaw("    BT AT command> - Send raw AT command\r\n");
-                LogRaw("    BT DIAL <number> <name> - Dial a number and display name\r\n");
-                LogRaw("    BT REDIAL - Dial last number\r\n");
-                LogRaw("    GET DAC - Get info from the PCM5122 DAC\r\n");
-                LogRaw("    GET ERR - Get the Error counter\r\n");
-                LogRaw("    GET IBUS - Get debug info from the IBus\r\n");
-                LogRaw("    GET UI - Get the current UI Mode\r\n");
-                LogRaw("    GET I2S - Read the WM8804 INT/SPD Status registers\r\n");
-                LogRaw("    GET VIN - Read the stored vehicle VIN\r\n");
-                LogRaw("    REBOOT - Reboot the device\r\n");
-                LogRaw("    SET COMFORT BLINKERS x - Set the comfort blinkers between 1 and 8\r\n");
-                LogRaw("    SET COMFORT LOCK x - Lock the car at the given KM/h. 10, 20 or OFF\r\n");
-                LogRaw("    SET COMFORT UNLOCK x - Unlock the car at the given ignition position. POS0, POS1 or OFF\r\n");
-                LogRaw("    SET DAC GAIN xx - Set the PCM5122 gain from 0x00 - 0xCF (higher is lower)\r\n");
-                LogRaw("    SET DSP INPUT ANALOG/DIGITAL/DEFAULT - Set the CD Changer DSP input\r\n");
-                LogRaw("    SET IGN ON/OFF/ALWAYSON - Send the ignition status message or configure the BlueBus to assume the ignition is always on\r\n");
-                LogRaw("    SET LOG x ON/OFF - Change logging for x (BT, IBUS, SYS, UI)\r\n");
-                LogRaw("    SET PWROFF ON/OFF - Enable or disable auto power off\r\n");
-                LogRaw("    SET TEL ON/OFF - Enable/Disable output as the TCU\r\n");
-                LogRaw("    SET TIME HH MM - Set the IKE Time\r\n");
-                LogRaw("    SET UI x - Set the UI to x, where x:\r\n");
-                LogRaw("        x = 1. CD53 (Business Radio)\r\n");
-                LogRaw("        x = 2. BMBT (Navigation)\r\n");
-                LogRaw("        x = 3. MID (Multi-Info Display)\r\n");
-                LogRaw("        x = 4. BMBT / MID\r\n");
-                LogRaw("        x = 5. Business Navigation (MIR)\r\n");
-                LogRaw("    RESTORE - Fully Reset the BlueBus and BC127 to factory defaults\r\n");
-                LogRaw("    VERSION - Get the BlueBus Hardware/Software Versions\r\n");
+                CLIWrite("    BT PBOPEN - Open a PBAP session with the connected device\r\n");
+                CLIWrite("    BT PBCLOSE - Close the PBAP session\r\n");
+                CLIWrite("    BT PBGET <offset> - Get phonebook contacts starting at offset\r\n");
+                CLIWrite("    BT AT command> - Send raw AT command\r\n");
+                CLIWrite("    BT DIAL <number> <name> - Dial a number and display name\r\n");
+                CLIWrite("    BT REDIAL - Dial last number\r\n");
+                CLIWrite("    GET DAC - Get info from the PCM5122 DAC\r\n");
+                CLIWrite("    GET ERR - Get the Error counter\r\n");
+                CLIWrite("    GET IBUS - Get debug info from the IBus\r\n");
+                CLIWrite("    GET UI - Get the current UI Mode\r\n");
+                CLIWrite("    GET I2S - Read the WM8804 INT/SPD Status registers\r\n");
+                CLIWrite("    GET VIN - Read the stored vehicle VIN\r\n");
+                CLIWrite("    REBOOT - Reboot the device\r\n");
+                CLIWrite("    SET COMFORT BLINKERS x - Set the comfort blinkers between 1 and 8\r\n");
+                CLIWrite("    SET COMFORT LOCK x - Lock the car at the given KM/h. 10, 20 or OFF\r\n");
+                CLIWrite("    SET COMFORT UNLOCK x - Unlock the car at the given ignition position. POS0, POS1 or OFF\r\n");
+                CLIWrite("    SET DAC GAIN xx - Set the PCM5122 gain from 0x00 - 0xCF (higher is lower)\r\n");
+                CLIWrite("    SET DSP INPUT ANALOG/DIGITAL/DEFAULT - Set the CD Changer DSP input\r\n");
+                CLIWrite("    SET HEADLESS ON/OFF - Enable or disable support for vehicles without a BMBT (Uncommon -- Do not use unless directed to)\r\n");
+                CLIWrite("    SET IGN ON/OFF/ALWAYSON - Send the ignition status message or configure the BlueBus to assume the ignition is always on\r\n");
+                CLIWrite("    SET LOG x ON/OFF - Change logging for x (BT, IBUS, SYS, UI)\r\n");
+                CLIWrite("    SET PWROFF ON/OFF - Enable or disable auto power off\r\n");
+                CLIWrite("    SET TEL ON/OFF - Enable/Disable output as the TCU\r\n");
+                CLIWrite("    SET TIME HH MM - Set the IKE Time\r\n");
+                CLIWrite("    SET UI x - Set the UI to x, where x:\r\n");
+                CLIWrite("        x = 1. CD53 (Business Radio)\r\n");
+                CLIWrite("        x = 2. BMBT (Navigation)\r\n");
+                CLIWrite("        x = 3. MID (Multi-Info Display)\r\n");
+                CLIWrite("        x = 4. BMBT / MID\r\n");
+                CLIWrite("        x = 5. Business Navigation (MIR)\r\n");
+                CLIWrite("    RESTORE - Fully Reset the BlueBus and BC127 to factory defaults\r\n");
+                CLIWrite("    VERSION - Get the BlueBus Hardware/Software Versions\r\n");
             } else {
                 cmdSuccess = 0;
             }
             if (cmdSuccess == 0) {
-                LogRaw("Command not found. Try HELP or ?\r\n# ");
+                CLIWrite("Command not found. Try HELP or ?\r\n# ");
             } else {
-                LogRaw("OK\r\n# ");
+                CLIWrite("OK\r\n# ");
             }
         } else {
             if (((TimerGetMillis() - cli.lastRxTimestamp) / 1000) > CLI_BANNER_TIMEOUT ||
                 cli.lastRxTimestamp == 0
             ) {
-                char version[9];
+                char version[9] = {0};
                 ConfigGetFirmwareVersionString(version);
-                LogRaw("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
-                LogRaw("BlueBus Firmware: %s\r\n", version);
-                LogRaw("Try HELP or ?\r\n");
-                LogRaw("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
+                CLIWrite("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
+                CLIWrite("BlueBus Firmware: %s\r\n", version);
+                CLIWrite("Try HELP or ?\r\n");
+                CLIWrite("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
             }
-            LogRaw("# ");
+            CLIWrite("# ");
         }
         cli.lastRxTimestamp = TimerGetMillis();
     }
@@ -941,13 +1201,13 @@ void CLITimerTerminalReady(void *ctx)
 {
     if (cli.terminalReady == 1) {
         cli.terminalReady = 2;
-        char version[9];
+        char version[9] = {0};
         ConfigGetFirmwareVersionString(version);
-        LogRaw("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
-        LogRaw("BlueBus Firmware: %s\r\n", version);
-        LogRaw("Try HELP or ?\r\n");
-        LogRaw("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
-        LogRaw("# ");
+        CLIWrite("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
+        CLIWrite("BlueBus Firmware: %s\r\n", version);
+        CLIWrite("Try HELP or ?\r\n");
+        CLIWrite("~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
+        CLIWrite("# ");
         cli.lastRxTimestamp = TimerGetMillis();
     }
 }

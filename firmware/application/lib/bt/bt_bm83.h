@@ -6,6 +6,7 @@
  */
 #ifndef BM83_H
 #define BM83_H
+#include <stddef.h>
 #include <stdint.h>
 #include "bt_common.h"
 
@@ -35,6 +36,75 @@ extern int8_t BTBM83MicGainTable[];
 
 #define BM83_LINKED_DEVICE_QUERY_NAME 0x00
 
+#define BM83_DEVICE_NAME_MAX_LEN 23
+
+#define BM83_PBAP_SUBCMD_OPEN_SESSION 0x00
+#define BM83_PBAP_SUBCMD_CLOSE_SESSION 0x01
+#define BM83_PBAP_SUBCMD_PULL_PHONEBOOK 0x02
+#define BM83_PBAP_SUBCMD_PULL_VCARD_LISTING 0x03
+#define BM83_PBAP_SUBCMD_PULL_VCARD_ENTRY 0x04
+#define BM83_PBAP_SUBCMD_SET_PHONEBOOK 0x05
+#define BM83_PBAP_SUBCMD_ABORT 0x06
+
+#define BM83_PBAP_EVT_SESSION_OPENED 0x00
+#define BM83_PBAP_EVT_SESSION_DISCONNECTED 0x01
+#define BM83_PBAP_EVT_PULL_PHONEBOOK_RSP 0x02
+#define BM83_PBAP_EVT_PULL_VCARD_LISTING_RSP 0x03
+#define BM83_PBAP_EVT_PULL_VCARD_ENTRY_RSP 0x04
+#define BM83_PBAP_EVT_SET_PHONEBOOK_RSP 0x05
+#define BM83_PBAP_EVT_ABORT_RSP 0x06
+#define BM83_PBAP_EVT_ERROR_RSP 0x07
+#define BM83_PBAP_EVT_SUPPORTED_FEATURES 0x08
+
+#define BM83_PBAP_PACKET_SINGLE 0x00
+#define BM83_PBAP_PACKET_FRAG_START 0x01
+#define BM83_PBAP_PACKET_FRAG_CONTINUE 0x02
+#define BM83_PBAP_PACKET_FRAG_END 0x03
+
+#define BM83_PBAP_REPO_TELECOM 0x00
+#define BM83_PBAP_REPO_SIM1 0x01
+
+#define BM83_PBAP_OBJ_PHONEBOOK 0x00
+#define BM83_PBAP_OBJ_INCOMING 0x01
+#define BM83_PBAP_OBJ_OUTGOING 0x02
+#define BM83_PBAP_OBJ_MISSED 0x03
+#define BM83_PBAP_OBJ_COMBINED 0x04
+#define BM83_PBAP_OBJ_SPEEDDIAL 0x05
+#define BM83_PBAP_OBJ_FAVORITES 0x06
+
+#define BM83_PBAP_FOLDER_TELECOM 0x00
+#define BM83_PBAP_FOLDER_SIM1 0x01
+#define BM83_PBAP_FOLDER_PB 0x02
+#define BM83_PBAP_FOLDER_ICH 0x03
+#define BM83_PBAP_FOLDER_OCH 0x04
+#define BM83_PBAP_FOLDER_MCH 0x05
+#define BM83_PBAP_FOLDER_CCH 0x06
+#define BM83_PBAP_FOLDER_SPD 0x07
+#define BM83_PBAP_FOLDER_FAV 0x08
+
+#define BM83_PBAP_ORDER_INDEXED 0x00
+#define BM83_PBAP_ORDER_ALPHABETICAL 0x01
+#define BM83_PBAP_ORDER_PHONETICAL 0x02
+
+#define BM83_PBAP_SEARCH_NAME 0x00
+#define BM83_PBAP_SEARCH_NUMBER 0x01
+#define BM83_PBAP_SEARCH_SOUND 0x02
+
+#define BM83_PBAP_FLAG_PROPERTY_SELECTOR (1 << 0)
+#define BM83_PBAP_FLAG_FORMAT (1 << 1)
+#define BM83_PBAP_FLAG_LIST_START_OFFSET (1 << 2)
+#define BM83_PBAP_FLAG_ORDER (1 << 3)
+#define BM83_PBAP_FLAG_SEARCH_VALUE (1 << 4)
+#define BM83_PBAP_FLAG_SEARCH_ATTRIBUTE (1 << 5)
+#define BM83_PBAP_FLAG_MAX_LIST_COUNT (1 << 14)
+
+#define BM83_PBAP_FORMAT_VCARD21 0x00
+#define BM83_PBAP_FORMAT_VCARD30 0x01
+
+#define BM83_PBAP_SESSION_SUCCESS 0x00
+#define BM83_PBAP_SESSION_FAIL 0x01
+
+#define BM83_PBAP_OFFSET_HEADER 56
 
 #define BM83_FRAME_DB0 0
 #define BM83_FRAME_DB1 1
@@ -53,6 +123,8 @@ extern int8_t BTBM83MicGainTable[];
 
 #define BM83_FRAME_SIZE_MIN 0x05
 #define BM83_FRAME_CTRL_BYTE_COUNT 0x04
+#define BM83_FRAME_DATA_MAX 636
+#define BM83_FRAME_TX_MAX 32
 
 #define BM83_OFFSET_EVENT_CODE 0x03
 #define BM83_OFFSET_EVENT_DATA 0x04
@@ -132,6 +204,7 @@ extern int8_t BTBM83MicGainTable[];
 #define BM83_CMD_ACTION_RW 0x03
 #define BM83_CMD_ACTION_PLAY 0x05
 #define BM83_CMD_ACTION_PAUSE 0x06
+#define BM83_CMD_ACTION_PLAYBACK_TOGGLE 0x07
 #define BM83_CMD_ACTION_STOP 0x08
 #define BM83_CMD_ACTION_NEXT 0x09
 #define BM83_CMD_ACTION_PREVIOUS 0x0A
@@ -151,6 +224,10 @@ extern int8_t BTBM83MicGainTable[];
 #define BM83_CMD_MMI_ACTION_MIC_GAIN_UP 0x24
 #define BM83_CMD_MMI_ACTION_MIC_GAIN_DOWN 0x25
 #define BM83_CMD_MMI_ACTION_RESTORE 0x56
+
+#define BM83_CMD_VENDOR_PARAM_CHANGE_DEVICE_NAME 0x00
+#define BM83_CMD_VENDOR_PARAM_RESTORE_DEVICE_NAME 0x01
+#define BM83_CMD_VENDOR_PARAM_CHANGE_MSPK_GROUP_ID 0x02
 
 #define BM83_DATA_BTM_STATUS_POWER_OFF 0x00
 #define BM83_DATA_BTM_STATUS_PAIRING_ON 0x01
@@ -214,17 +291,17 @@ extern int8_t BTBM83MicGainTable[];
 #define BM83_DATA_LINK_BACK_ACL 0x00
 #define BM83_DATA_LINK_BACK_HF 0x01
 #define BM83_DATA_LINK_BACK_A2DP 0x02
-#define BM83_DATA_LINK_BACK_ACL_FAILED 0xFF
-#define BM83_DATA_LINK_BACK_A2DP_HF_SUCCESS 0x00
-#define BM83_DATA_LINK_BACK_A2DP_HF_FAILED 0x01
+#define BM83_DATA_LINK_BACK_RES_ACL_FAILED 0xFF
+#define BM83_DATA_LINK_BACK_RES_SUCCESS 0x00
+#define BM83_DATA_LINK_BACK_RES_FAILED 0x01
 
-#define BM83_DATA_DSP_REPORTED_SR_8kHz 0x00
-#define BM83_DATA_DSP_REPORTED_SR_16kHz 0x02
-#define BM83_DATA_DSP_REPORTED_SR_32kHz 0x04
-#define BM83_DATA_DSP_REPORTED_SR_48kHz 0x05
-#define BM83_DATA_DSP_REPORTED_SR_44_1kHz 0x06
-#define BM83_DATA_DSP_REPORTED_SR_88kHz 0x07
-#define BM83_DATA_DSP_REPORTED_SR_96kHz 0x08
+#define BM83_DATA_DSP_REPORTED_SR_8KHZ 0x00
+#define BM83_DATA_DSP_REPORTED_SR_16KHZ 0x02
+#define BM83_DATA_DSP_REPORTED_SR_32KHZ 0x04
+#define BM83_DATA_DSP_REPORTED_SR_48KHZ 0x05
+#define BM83_DATA_DSP_REPORTED_SR_44_1KHZ 0x06
+#define BM83_DATA_DSP_REPORTED_SR_88KHZ 0x07
+#define BM83_DATA_DSP_REPORTED_SR_96KHZ 0x08
 
 #define BM83_DATA_DSP_REPORTED_MODE_NONE 0x00
 #define BM83_DATA_DSP_REPORTED_MODE_PREPARE 0x01
@@ -318,23 +395,32 @@ void BM83CommandAVRCPRegisterNotification(BT_t *, uint8_t);
 void BM83CommandBTMUtilityFunction(BT_t *, uint8_t, uint8_t);
 void BM83CommandCallAccept(BT_t *);
 void BM83CommandCallEnd(BT_t *);
+void BM83CommandChangeDeviceName(BT_t *, char *);
 void BM83CommandConnect(BT_t *, BTPairedDevice_t *, uint8_t);
-void BM83CommandDeviceDiscovery(BT_t *);
 void BM83CommandDial(BT_t *, char *);
 void BM83CommandDisconnect(BT_t *, uint8_t);
 void BM83CommandLinkBackLastDevice(BT_t *);
 void BM83CommandMicGainDown(BT_t *);
 void BM83CommandMicGainUp(BT_t *);
 void BM83CommandMusicControl(BT_t *, uint8_t);
-void BM83CommandPairingEnable(BT_t *);
 void BM83CommandPairingDisable(BT_t *);
+void BM83CommandPairingEnable(BT_t *);
+void BM83CommandPBAPAbort(BT_t *);
+void BM83CommandPBAPClose(BT_t *);
+void BM83CommandPBAPContinuation(BT_t *);
+void BM83CommandPBAPGetPhonebook(BT_t *, uint8_t, uint16_t, uint8_t);
+void BM83CommandPBAPOpen(BT_t *);
+void BM83CommandPBAPSearchByNumber(BT_t *, char *);
 void BM83CommandPowerOn(BT_t *);
 void BM83CommandReadLinkStatus(BT_t *);
 void BM83CommandReadLinkedDeviceInformation(BT_t *, uint8_t);
 void BM83CommandReadLocalBDAddress(BT_t *);
+void BM83CommandReadLocalDeviceName(BT_t *);
 void BM83CommandReadPairedDevices(BT_t *);
 void BM83CommandRedial(BT_t *);
 void BM83CommandRestore(BT_t *);
+void BM83CommandRestoreDefaultDeviceName(BT_t *);
+void BM83CommandSetLocalDeviceName(BT_t *, char *);
 void BM83CommandVendorATCommand(BT_t *, char *);
 void BM83CommandVoiceRecognitionClose(BT_t *);
 void BM83CommandVoiceRecognitionOpen(BT_t *);
@@ -344,12 +430,13 @@ void BM83ProcessEventAVCVendorDependentRsp(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventBTMStatus(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventCallStatus(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventCallerID(BT_t *, uint8_t *, uint16_t);
+void BM83ProcessEventPBAP(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventReadLinkStatus(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventReadLinkedDeviceInformation(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventReadPairedDeviceRecord(BT_t *, uint8_t *, uint16_t);
 void BM83ProcessEventReportLinkBackStatus(BT_t *, uint8_t *, uint16_t);
-void BM83ProcessEventReportTypeCodec(BT_t *, uint8_t *, uint16_t );
-void BM83ProcessDataGetAllAttributes(BT_t *, uint8_t *, uint8_t, uint16_t);
+void BM83ProcessEventReportTypeCodec(BT_t *, uint8_t *, uint16_t);
+void BM83ProcessDataGetAllAttributes(BT_t *, uint8_t *, uint16_t, uint8_t, uint16_t);
 /* RX / TX */
 void BM83Process(BT_t *);
 void BM83SendCommand(BT_t *, uint8_t *, size_t);

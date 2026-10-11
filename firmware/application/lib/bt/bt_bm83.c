@@ -5,7 +5,15 @@
  *     Implementation of the Microchip BM83 Bluetooth UART API
  */
 #include "bt_bm83.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "bt_common.h"
+#include "../event.h"
 #include "../locale.h"
+#include "../log.h"
+#include "../utils.h"
 
 int8_t BTBM83MicGainTable[] = {
     0, // Default
@@ -163,6 +171,33 @@ void BM83CommandCallEnd(BT_t *bt)
 }
 
 /**
+ * BM83CommandChangeDeviceName()
+ *     Description:
+ *         Change the device name reported in the LMP name response and the
+ *         EIR inquiry response (Change_Device_Name -> 0x05). This is not a
+ *         persistent value, so it must be set every time we power on
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         char *name - The device name to set
+ *     Returns:
+ *         void
+ */
+void BM83CommandChangeDeviceName(BT_t *bt, char *name)
+{
+    uint8_t nameLength = strlen(name);
+    if (nameLength > BM83_DEVICE_NAME_MAX_LEN) {
+        nameLength = BM83_DEVICE_NAME_MAX_LEN;
+    }
+    uint8_t command[BM83_DEVICE_NAME_MAX_LEN + 1] = {0};
+    command[0] = BM83_CMD_CHANGE_DEVICE_NAME;
+    uint8_t i = 0;
+    for (i = 0; i < nameLength; i++) {
+        command[i + 1] = name[i];
+    }
+    BM83SendCommand(bt, command, nameLength + 1);
+}
+
+/**
  * BM83CommandConnect()
  *     Description:
  *         Link back to a paired device (Profiles_Link_Back -> 0x17)
@@ -188,7 +223,8 @@ void BM83CommandConnect(BT_t *bt, BTPairedDevice_t *dev, uint8_t profiles)
         dev->macId[0]
     };
     // Make this the active device
-    memcpy(bt->activeDevice.macId, dev->macId, BT_MAC_ID_LEN);
+    BTClearActiveDevice(bt);
+    bt->activeDevice.deviceIndex = dev->number;
     bt->status = BT_STATUS_CONNECTING;
     BM83SendCommand(bt, command, sizeof(command));
 }
@@ -333,6 +369,143 @@ void BM83CommandPairingDisable(BT_t *bt)
 }
 
 /**
+ * BM83CommandPBAPAbort()
+ *     Description:
+ *         Abort an ongoing PBAP request (PBAPC_Cmd -> 0x3F, Sub 0x06)
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BM83CommandPBAPAbort(BT_t *bt)
+{
+    uint8_t command[] = {
+        BM83_CMD_PBAPC_CMD,
+        BM83_PBAP_SUBCMD_ABORT,
+        bt->activeDevice.deviceId & 0xF
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandPBAPClose()
+ *     Description:
+ *         Close the PBAP session (PBAPC_Cmd -> 0x3F, Sub 0x01)
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BM83CommandPBAPClose(BT_t *bt)
+{
+    uint8_t command[] = {
+        BM83_CMD_PBAPC_CMD,
+        BM83_PBAP_SUBCMD_CLOSE_SESSION,
+        bt->activeDevice.deviceId & 0xF
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandPBAPContiunation()
+ *     Description:
+ *         Send a PBAP continuation request
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         uint8_t type - The phonebook type to pull
+ *         uint16_t offset - The starting offset (0 for first page)
+ *         uint8_t maxCount - Maximum number of entries to retrieve (up to 8)
+ *     Returns:
+ *         void
+ */
+void BM83CommandPBAPContinuation(BT_t *bt)
+{
+    uint8_t command[29] = {0};
+    command[0] = BM83_CMD_PBAPC_CMD;
+    command[1] = BM83_PBAP_SUBCMD_PULL_PHONEBOOK;
+    command[2] = bt->activeDevice.deviceId & 0xF;
+    command[3] = BM83_PBAP_REPO_TELECOM;
+    command[17] = BM83_PBAP_FORMAT_VCARD30;
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandPBAPGetPhonebook()
+ *     Description:
+ *         Get a list of contacts with name and phone numbers
+ *         (PBAPC_Cmd -> 0x3F, Sub 0x02 Pull_Phone_Book_Req)
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         uint8_t type - The phonebook type to pull
+ *         uint16_t offset - The starting offset (0 for first page)
+ *         uint8_t maxCount - Maximum number of entries to retrieve (up to 8)
+ *     Returns:
+ *         void
+ */
+void BM83CommandPBAPGetPhonebook(BT_t *bt, uint8_t type, uint16_t offset, uint8_t maxCount)
+{
+    // Flags: Property Selector, Format, List_Start_Offset, Max_List_Count
+    uint16_t flags = (
+        BM83_PBAP_FLAG_PROPERTY_SELECTOR |
+        BM83_PBAP_FLAG_FORMAT |
+        BM83_PBAP_FLAG_LIST_START_OFFSET |
+        BM83_PBAP_FLAG_MAX_LIST_COUNT
+    );
+    uint8_t command[] = {
+        BM83_CMD_PBAPC_CMD,
+        BM83_PBAP_SUBCMD_PULL_PHONEBOOK,
+        bt->activeDevice.deviceId & 0xF, // Linked Database, the lower nibble
+        BM83_PBAP_REPO_TELECOM,
+        type,
+        (uint8_t)(flags >> 8),
+        (uint8_t)(flags & 0xFF),
+        (uint8_t)(maxCount >> 8),
+        (uint8_t)(maxCount & 0xFF),
+        0x82, // Property Selector: Bit 1 = FN, Bit 7 = TEL -> byte 0 = 0x82
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        BM83_PBAP_FORMAT_VCARD21,
+        (uint8_t) (offset >> 8),
+        (uint8_t) (offset & 0xFF),
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandPBAPOpen()
+ *     Description:
+ *         Open a PBAP session with the connected device
+ *         (PBAPC_Cmd -> 0x3F, Sub 0x00)
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BM83CommandPBAPOpen(BT_t *bt)
+{
+    uint8_t command[] = {
+        BM83_CMD_PBAPC_CMD,
+        BM83_PBAP_SUBCMD_OPEN_SESSION,
+        bt->activeDevice.deviceId & 0xF
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
  * BM83CommandPowerOn()
  *     Description:
  *         Power the Module on (MMI_Action -> 0x02)
@@ -403,6 +576,26 @@ void BM83CommandReadLocalBDAddress(BT_t *bt)
 }
 
 /**
+ * BM83CommandReadLocalDeviceName()
+ *     Description:
+ *         Request the device name stored in the module configuration data
+ *         (Read_Local_Device_Name -> 0x10). The module replies with the
+ *         Read_Local_Device_Name_Reply (0x21) event
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BM83CommandReadLocalDeviceName(BT_t *bt)
+{
+    uint8_t command[] = {
+        BM83_CMD_READ_LOCAL_DEVICE_NAME,
+        0x00 // Reserved
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
  * BM83CommandReadPairedDevices()
  *     Description:
  *         Request the paired devices list
@@ -453,6 +646,58 @@ void BM83CommandRestore(BT_t *bt)
         BM83_CMD_MMI_ACTION_RESTORE
     };
     BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandRestoreDefaultDeviceName()
+ *     Description:
+ *         Restore the device name in the module configuration data back to
+ *         the default set in the UI parameters
+ *         (Configure_Vendor_Parameter -> 0x35)
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *     Returns:
+ *         void
+ */
+void BM83CommandRestoreDefaultDeviceName(BT_t *bt)
+{
+    uint8_t command[] = {
+        BM83_CMD_CONFIGURE_VENDOR_PARAMETER,
+        BM83_CMD_VENDOR_PARAM_RESTORE_DEVICE_NAME,
+        0x00 // Option - Reserved
+    };
+    BM83SendCommand(bt, command, sizeof(command));
+}
+
+/**
+ * BM83CommandSetLocalDeviceName()
+ *     Description:
+ *         Write the device name to the module configuration data, which is
+ *         where the module sources the name used for BLE advertising and on
+ *         boot (Configure_Vendor_Parameter -> 0x35). The module rejects any
+ *         name longer than BM83_DEVICE_NAME_MAX_LEN bytes
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         char *name - The device name to set
+ *     Returns:
+ *         void
+ */
+void BM83CommandSetLocalDeviceName(BT_t *bt, char *name)
+{
+    uint8_t nameLength = strlen(name);
+    if (nameLength > BM83_DEVICE_NAME_MAX_LEN) {
+        nameLength = BM83_DEVICE_NAME_MAX_LEN;
+    }
+    uint8_t command[BM83_DEVICE_NAME_MAX_LEN + 4] = {0};
+    command[0] = BM83_CMD_CONFIGURE_VENDOR_PARAMETER;
+    command[1] = BM83_CMD_VENDOR_PARAM_CHANGE_DEVICE_NAME;
+    command[2] = 0x00; // Option - Reserved
+    command[3] = nameLength;
+    uint8_t i = 0;
+    for (i = 0; i < nameLength; i++) {
+        command[i + 4] = name[i];
+    }
+    BM83SendCommand(bt, command, nameLength + 4);
 }
 
 /**
@@ -575,10 +820,13 @@ void BM83ProcessEventAVCSpecificRsp(BT_t *bt, uint8_t *data, uint16_t length)
             ) {
                 // Clear the available capabilities
                 memset(&bt->activeDevice.avrcpCaps, 0, sizeof(BTConnectionAVRCPCapabilities_t));
-                uint8_t length = data[BM83_FRAME_DB12];
                 uint8_t i = 0;
-                for (i = 0; i < length; i++) {
-                    switch (data[BM83_FRAME_DB13 + i]) {
+                for (i = 0; i < data[BM83_FRAME_DB12]; i++) {
+                    uint8_t idx = BM83_FRAME_DB13 + i;
+                    if (idx >= length) {
+                        break;
+                    }
+                    switch (data[idx]) {
                         case BM83_AVRCP_EVT_PLAYBACK_STATUS_CHANGED:
                             bt->activeDevice.avrcpCaps.playbackChanged = 1;
                             break;
@@ -609,6 +857,7 @@ void BM83ProcessEventAVCSpecificRsp(BT_t *bt, uint8_t *data, uint16_t length)
                 BM83ProcessDataGetAllAttributes(
                     bt,
                     data,
+                    length,
                     attributeCount,
                     BM83_FRAME_DB12
                 );
@@ -678,12 +927,17 @@ void BM83ProcessEventAVCVendorDependentRsp(BT_t *bt, uint8_t *data, uint16_t len
     uint8_t event = data[BM83_FRAME_DB0];
     uint8_t type = data[BM83_FRAME_DB2];
     LogDebug(LOG_SOURCE_BT, "BT: AVRCP Dependent: %02X -> %02X", type, event);
+    if (type == BM83_DATA_AVC_RSP_NOT_IMPL || type == BM83_DATA_AVC_RSP_REJECT) {
+        LogDebug(LOG_SOURCE_BT, "BT: Ignoring Errant Response");
+        return;
+    }
     switch (event) {
         case BM83_AVRCP_PDU_GET_ELEMENT_ATTRIBUTES: {
             uint8_t attributeCount = data[BM83_FRAME_DB4];
             BM83ProcessDataGetAllAttributes(
                 bt,
                 data,
+                length,
                 attributeCount,
                 BM83_FRAME_DB7
             );
@@ -703,6 +957,7 @@ void BM83ProcessEventAVCVendorDependentRsp(BT_t *bt, uint8_t *data, uint16_t len
  */
 void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
 {
+    uint8_t isDisco = 0;
     switch (data[BM83_FRAME_DB0]) {
         case BM83_DATA_BTM_STATUS_POWER_OFF: {
             LogDebug(LOG_SOURCE_BT, "BT: Power Off");
@@ -713,6 +968,8 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
         case BM83_DATA_BTM_STATUS_PAIRING_ON: {
             LogDebug(LOG_SOURCE_BT, "BT: Pairing On");
             bt->discoverable = BT_STATE_ON;
+            uint8_t status = BT_STATE_ON;
+            EventTriggerCallback(BT_EVENT_PAIRING_STATUS, &status);
             break;
         }
         case BM83_DATA_BTM_STATUS_POWER_ON: {
@@ -727,11 +984,15 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
             LogDebug(LOG_SOURCE_BT, "BT: Pairing Ok");
             bt->discoverable = BT_STATE_OFF;
             bt->status = BT_STATUS_CONNECTED;
+            // New Pairings don't provide any information on connect
+            BM83CommandReadPairedDevices(bt);
             break;
         }
         case BM83_DATA_BTM_STATUS_PAIRING_NOK: {
             LogDebug(LOG_SOURCE_BT, "BT: Pairing Error");
             bt->discoverable = BT_STATE_OFF;
+            uint8_t status = BT_STATE_OFF;
+            EventTriggerCallback(BT_EVENT_PAIRING_STATUS, &status);
             break;
         }
         case BM83_DATA_BTM_STATUS_HFP_CONN: {
@@ -754,7 +1015,7 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
         }
         case BM83_DATA_BTM_STATUS_HFP_DISCO: {
             LogDebug(LOG_SOURCE_BT, "BT: HFP Closed");
-            bt->status = BT_STATUS_DISCONNECTED;
+            isDisco = 1;
             bt->activeDevice.hfpId = 0;
             uint8_t linkType = BT_LINK_TYPE_HFP;
             EventTriggerCallback(BT_EVENT_DEVICE_LINK_DISCONNECTED, &linkType);
@@ -762,7 +1023,7 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
         }
         case BM83_DATA_BTM_STATUS_A2DP_DISCO: {
             LogDebug(LOG_SOURCE_BT, "BT: A2DP Closed");
-            bt->status = BT_STATUS_DISCONNECTED;
+            isDisco = 1;
             bt->activeDevice.deviceId = 0;
             bt->activeDevice.a2dpId = 0;
             uint8_t linkType = BT_LINK_TYPE_A2DP;
@@ -799,7 +1060,7 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
         }
         case BM83_DATA_BTM_STATUS_AVRCP_DISCO: {
             LogDebug(LOG_SOURCE_BT, "BT: ARVCP Closed");
-            bt->status = BT_STATUS_DISCONNECTED;
+            isDisco = 1;
             bt->activeDevice.avrcpId = 0;
             uint8_t linkType = BT_LINK_TYPE_AVRCP;
             EventTriggerCallback(BT_EVENT_DEVICE_LINK_DISCONNECTED, &linkType);
@@ -814,15 +1075,18 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
         }
         case BM83_DATA_BTM_STATUS_STANDBY_ON: {
             LogDebug(LOG_SOURCE_BT, "BT: Standby On");
-            if (bt->activeDevice.deviceId != 0) {
-                memset(&bt->activeDevice, 0, sizeof(BTConnection_t));
+            if (bt->activeDevice.status == BT_DEVICE_STATUS_CONNECTED) {
+                BTClearActiveDevice(bt);
                 LogDebug(LOG_SOURCE_BT, "BT: Device Disconnected [BTM Standby]");
                 EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
             }
             // We need to set this flag so we can attempt to connect
             bt->status = BT_STATUS_DISCONNECTED;
             bt->powerState = BT_STATE_STANDBY;
-            EventTriggerCallback(BT_EVENT_BOOT_STATUS, 0);
+            uint8_t state = BM83_DATA_BTM_STATUS_STANDBY_ON;
+            // Immediately allow another connection attempt
+            bt->lastConnection = 0;
+            EventTriggerCallback(BT_EVENT_BOOT_STATUS, &state);
             break;
         }
         case BM83_DATA_BTM_STATUS_IAP_CONN: {
@@ -830,12 +1094,15 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
             break;
         }
         case BM83_DATA_BTM_STATUS_ACL_DISCO: {
+            uint8_t status = bt->status;
             bt->status = BT_STATUS_DISCONNECTED;
-            memset(&bt->activeDevice, 0, sizeof(BTConnection_t));
+            BTClearActiveDevice(bt);
             LogDebug(LOG_SOURCE_BT, "BT: Device Disconnected");
             uint8_t linkType = BT_LINK_TYPE_ACL;
             EventTriggerCallback(BT_EVENT_DEVICE_LINK_DISCONNECTED, &linkType);
-            EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+            if (status == BT_STATUS_CONNECTED) {
+                EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+            }
             break;
         }
         case BM83_DATA_BTM_STATUS_MAP_CONN: {
@@ -848,12 +1115,8 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
             break;
         }
         case BM83_DATA_BTM_STATUS_ACL_CONN: {
-            // Store the MAC ID for the new active device profile
-            uint8_t tempDeviceMacId[BT_MAC_ID_LEN] = {0};
-            memcpy(tempDeviceMacId, bt->activeDevice.macId, BT_MAC_ID_LEN);
-            bt->activeDevice = BTConnectionInit();
             bt->status = BT_STATUS_CONNECTED;
-            memcpy(bt->activeDevice.macId, tempDeviceMacId, BT_MAC_ID_LEN);
+            bt->activeDevice.status = BT_DEVICE_STATUS_CONNECTED;
             LogDebug(LOG_SOURCE_BT, "BT: Device Connected");
             EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
             break;
@@ -882,6 +1145,14 @@ void BM83ProcessEventBTMStatus(BT_t *bt, uint8_t *data, uint16_t length)
             LogDebug(LOG_SOURCE_BT, "BT: Audio Source A2DP");
             break;
         }
+    }
+    if (
+        bt->activeDevice.hfpId == 0 &&
+        bt->activeDevice.a2dpId == 0 &&
+        bt->activeDevice.avrcpId == 0 &&
+        isDisco == 1
+    ) {
+        bt->status = BT_STATUS_DISCONNECTED;
     }
 }
 
@@ -950,15 +1221,157 @@ void BM83ProcessEventCallStatus(BT_t *bt, uint8_t *data, uint16_t length)
  */
 void BM83ProcessEventCallerID(BT_t *bt, uint8_t *data, uint16_t length)
 {
-    char callerId[length + 1];
+    char callerId[BT_CALLER_ID_FIELD_SIZE];
+    memset(callerId, 0, BT_CALLER_ID_FIELD_SIZE);
+    uint16_t copyLen = length;
+    if (copyLen > BT_CALLER_ID_FIELD_SIZE - 1) {
+        copyLen = BT_CALLER_ID_FIELD_SIZE - 1;
+    }
     uint16_t i = 0;
-    for (i = 0; i < length; i++) {
+    for (i = 0; i < copyLen; i++) {
         callerId[i] = data[i + BM83_FRAME_DB1];
     }
-    callerId[i] = 0;
     memset(bt->callerId, 0, BT_CALLER_ID_FIELD_SIZE);
     UtilsStrncpy(bt->callerId, callerId, BT_CALLER_ID_FIELD_SIZE);
     EventTriggerCallback(BT_EVENT_CALLER_ID_UPDATE, 0);
+}
+
+/**
+ * BM83ProcessEventPBAP()
+ *     Description:
+ *         Process PBAP events with state machine vCard parsing
+ *     Params:
+ *         BT_t *bt - A pointer to the module object
+ *         uint8_t *data - The frame data
+ *         uint16_t length - The size of the frame
+ *     Returns:
+ *         void
+ */
+void BM83ProcessEventPBAP(BT_t *bt, uint8_t *data, uint16_t length)
+{
+    if (length < 5) {
+        LogWarning("BT: PBAP event too short");
+        return;
+    }
+    uint8_t packetType = data[0];
+    uint16_t payloadLength = ((uint16_t)data[3] << 8) | data[4];
+    if (payloadLength == 0) {
+        return;
+    }
+    uint8_t *payload = &data[5];
+    if (
+        packetType == BM83_PBAP_PACKET_SINGLE ||
+        packetType == BM83_PBAP_PACKET_FRAG_START
+    ) {
+        bt->pbap.parser.subEvent = payload[0];
+        if (bt->pbap.parser.subEvent == BM83_PBAP_EVT_SESSION_OPENED) {
+            if (payloadLength >= 3) {
+                uint8_t status = payload[2];
+                bt->pbap.active = (status == BM83_PBAP_SESSION_SUCCESS);
+                bt->pbap.status = BT_PBAP_STATUS_IDLE;
+                LogDebug(
+                    LOG_SOURCE_BT,
+                    "BT: PBAP Session %s",
+                    bt->pbap.active ? "Opened" : "Failed"
+                );
+                EventTriggerCallback(BT_EVENT_PBAP_SESSION_STATUS, &status);
+            }
+            return;
+        }
+        if (bt->pbap.parser.subEvent == BM83_PBAP_EVT_SESSION_DISCONNECTED) {
+            bt->pbap.active = 0;
+            bt->pbap.status = BT_PBAP_STATUS_IDLE;
+            LogDebug(LOG_SOURCE_BT, "BT: PBAP Session Disconnected");
+            uint8_t status = 0xFF;
+            EventTriggerCallback(BT_EVENT_PBAP_SESSION_STATUS, &status);
+            return;
+        }
+        if (bt->pbap.parser.subEvent == BM83_PBAP_EVT_ERROR_RSP) {
+            if (payloadLength >= 3) {
+                uint8_t errorCode = payload[2];
+                LogWarning("BT: PBAP Error: 0x%02X", errorCode);
+            }
+            bt->pbap.status = BT_PBAP_STATUS_IDLE;
+            return;
+        }
+    }
+    if (
+        bt->pbap.parser.subEvent == BM83_PBAP_EVT_PULL_PHONEBOOK_RSP ||
+        bt->pbap.parser.subEvent == BM83_PBAP_EVT_PULL_VCARD_LISTING_RSP
+    ) {
+        // For CONTINUE/END packets, vCard data starts immediately
+        // For SINGLE/FRAG_START, we must skip the PBAP response headers
+        uint16_t dataOffset = 0;
+        if (
+            packetType == BM83_PBAP_PACKET_SINGLE ||
+            packetType == BM83_PBAP_PACKET_FRAG_START
+        ) {
+            // Only reset contact state if this is a new operation, not a continuation
+            if (bt->pbap.status != BT_PBAP_STATUS_WAITING) {
+                bt->pbap.status = BT_PBAP_STATUS_WAITING;
+                bt->pbap.contactCount = 0;
+                bt->pbap.contactIdx = 0;
+                memset(&bt->pbap.parser, 0, sizeof(bt->pbap.parser));
+                memset(bt->pbap.contacts, 0, sizeof(bt->pbap.contacts));
+                // Reset the current sub-event
+                bt->pbap.parser.subEvent = payload[0];
+            }
+            if (payloadLength >= 3) {
+                bt->pbap.parser.isEndOfBody = payload[2];
+            }
+            // The first 56 bytes are the header data that we want to avoid
+            dataOffset = BM83_PBAP_OFFSET_HEADER;
+            // Scan forward past any extra padding
+            while (dataOffset < payloadLength && payload[dataOffset] == 0) {
+                dataOffset++;
+            }
+        }
+        // Process vCard data byte by byte
+        uint16_t i;
+        for (i = dataOffset; i < payloadLength; i++) {
+            uint8_t currByte = payload[i];
+            // CRLF reached, which means we have one line from the vCard
+            if (bt->pbap.parser.isDelim && currByte == '\n') {
+                bt->pbap.parser.isDelim = 0;
+                bt->pbap.parser.buffer[bt->pbap.parser.bufferIdx] = 0;
+                if (
+                    bt->pbap.parser.bufferIdx > 0 &&
+                    bt->pbap.parser.buffer[0] != ' ' &&
+                    bt->pbap.parser.buffer[0] != '\t'
+                ) {
+                    BTPBAPParseVCard(bt);
+                }
+                bt->pbap.parser.bufferIdx = 0;
+                continue;
+            }
+            bt->pbap.parser.isDelim = (currByte == BT_PBAP_FRAME_DELIM);
+            if (bt->pbap.parser.isDelim) {
+                continue;
+            }
+            if (bt->pbap.parser.bufferIdx < (BT_PBAP_LINE_BUFFER_SIZE - 1)) {
+                bt->pbap.parser.buffer[bt->pbap.parser.bufferIdx++] = currByte;
+            } else {
+                LogWarning("BT: PBAP Parser Buffer Overflow Guard");
+            }
+        }
+        if (
+            packetType == BM83_PBAP_PACKET_SINGLE ||
+            packetType == BM83_PBAP_PACKET_FRAG_END
+        ) {
+            if (bt->pbap.parser.isEndOfBody) {
+                // Transfer complete - trigger callback
+                bt->pbap.status = BT_PBAP_STATUS_IDLE;
+                LogDebug(
+                    LOG_SOURCE_BT,
+                    "BT: PBAP complete, %d contacts",
+                    bt->pbap.contactCount
+                );
+                EventTriggerCallback(BT_EVENT_PBAP_CONTACT_RECEIVED, 0);
+            } else {
+                BM83CommandPBAPContinuation(bt);
+            }
+        }
+    }
 }
 
 /**
@@ -989,9 +1402,14 @@ void BM83ProcessEventReadLinkStatus(BT_t *bt, uint8_t *data, uint16_t length)
             break;
         case BM83_DATA_LINK_STATE_STANDBY:
             LogDebug(LOG_SOURCE_BT, "BT: Standby On");
+            uint8_t currentStatus = bt->status;
             bt->status = BT_STATUS_DISCONNECTED;
             bt->powerState = BT_STATE_STANDBY;
-            EventTriggerCallback(BT_EVENT_BOOT_STATUS, 0);
+            if (currentStatus == BT_STATUS_CONNECTING) {
+                EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+            } else {
+                EventTriggerCallback(BT_EVENT_BOOT_STATUS, 0);
+            }
             break;
         case BM83_DATA_LINK_STATE_HF_CONNECTED_ONLY:
         case BM83_DATA_LINK_STATE_A2DP_CONNECTED_ONLY:
@@ -1029,20 +1447,19 @@ void BM83ProcessEventReadLinkedDeviceInformation(BT_t *bt, uint8_t *data, uint16
             }
             UtilsNormalizeText(deviceName, nameData, BT_DEVICE_NAME_LEN + 1);
             LogDebug(LOG_SOURCE_BT, "Connected: %s", deviceName);
-            UtilsStrncpy(bt->activeDevice.deviceName, deviceName, BT_DEVICE_NAME_LEN);
-            // Copy the device name to its pairing record
-            BTPairedDevice_t *dev = 0;
-            for (i = 0; i < bt->pairedDevicesCount; i++) {
-                dev = &bt->pairedDevices[i];
-                if (dev != 0) {
-                    if (memcmp(dev->macId, bt->activeDevice.macId, BT_MAC_ID_LEN) == 0) {
-                        UtilsStrncpy(
-                            dev->deviceName, 
-                            deviceName, 
-                            BT_DEVICE_NAME_LEN
-                        );
-                    }
-                }
+            // Update the device name in the pairing record if necessary
+            BTPairedDevice_t *dev = &bt->pairedDevices[bt->activeDevice.deviceIndex];
+            if (strcmp(dev->deviceName, deviceName) != 0) {
+                UtilsStrncpy(
+                    dev->deviceName,
+                    deviceName,
+                    BT_DEVICE_NAME_LEN
+                );
+                BTPairedDeviceSave(
+                    dev->macId,
+                    dev->deviceName,
+                    bt->activeDevice.deviceIndex
+                );
             }
             EventTriggerCallback(BT_EVENT_DEVICE_CONNECTED, 0);
             break;
@@ -1061,19 +1478,27 @@ void BM83ProcessEventReadLinkedDeviceInformation(BT_t *bt, uint8_t *data, uint16
  */
 void BM83ProcessEventReadPairedDeviceRecord(BT_t *bt, uint8_t *data, uint16_t length)
 {
+    // Always clear paired device records before moving forward
+    BTClearPairedDevices(bt);
     uint8_t pairedDevices = data[BM83_FRAME_DB0];
+    if (pairedDevices > BT_MAX_PAIRINGS) {
+        pairedDevices = BT_MAX_PAIRINGS;
+    }
     uint16_t dataPos = BM83_FRAME_DB1;
-    while (pairedDevices > 0) {
+    uint8_t deviceIndex = 0;
+    while (pairedDevices > 0 && (dataPos + 7) <= length) {
         uint8_t macId[6] = {0};
-        uint8_t number = data[dataPos++];
-        int8_t i;
+        // Skip over the link priority
+        dataPos++;
+        uint8_t i;
         for (i = 6; i > 0; i--) {
             macId[i - 1] = data[dataPos++];
         }
-        BTPairedDeviceInit(bt, macId, "", number);
+        BTPairedDeviceInit(bt, macId, deviceIndex);
+        deviceIndex++;
         pairedDevices--;
     }
-    EventTriggerCallback(BT_EVENT_DEVICE_FOUND, 0);
+    EventTriggerCallback(BT_EVENT_PAIRINGS_LOADED, 0);
 }
 
 /**
@@ -1092,19 +1517,50 @@ void BM83ProcessEventReportLinkBackStatus(BT_t *bt, uint8_t *data, uint16_t leng
 {
     uint8_t linkType = data[BM83_FRAME_DB0];
     uint8_t linkStatus = data[BM83_FRAME_DB1];
-    if (linkType == BM83_DATA_LINK_BACK_ACL &&
-        linkStatus == BM83_DATA_LINK_BACK_ACL_FAILED
-    ) {
-        bt->status = BT_STATUS_DISCONNECTED;
-        EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
-    }
-    if ((linkType == BM83_DATA_LINK_BACK_HF || linkType == BM83_DATA_LINK_BACK_A2DP) &&
-        linkStatus == BM83_DATA_LINK_BACK_A2DP_HF_FAILED
-    ) {
-        bt->status = BT_STATUS_DISCONNECTED;
-        EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
-    }
     uint8_t eventData[2] = {linkType, linkStatus};
+    if (
+        linkType == BM83_DATA_LINK_BACK_ACL &&
+        linkStatus == BM83_DATA_LINK_BACK_RES_ACL_FAILED
+    ) {
+        bt->activeDevice.deviceId = 0;
+        bt->status = BT_STATUS_DISCONNECTED;
+    }
+    if (linkType == BM83_DATA_LINK_BACK_A2DP) {
+        if (
+            linkStatus == BM83_DATA_LINK_BACK_RES_SUCCESS &&
+            bt->activeDevice.a2dpId == 0
+        ) {
+            bt->activeDevice.a2dpId = 1;
+        }
+        if (
+            linkStatus == BM83_DATA_LINK_BACK_RES_FAILED &&
+            bt->activeDevice.a2dpId == 1
+        ) {
+            bt->activeDevice.a2dpId = 0;
+        }
+    }
+    if (linkType == BM83_DATA_LINK_BACK_HF) {
+        if (
+            linkStatus == BM83_DATA_LINK_BACK_RES_SUCCESS &&
+            bt->activeDevice.hfpId == 0
+        ) {
+            bt->activeDevice.hfpId = 1;
+        }
+        if (
+            linkStatus == BM83_DATA_LINK_BACK_RES_FAILED &&
+            bt->activeDevice.hfpId == 1
+        ) {
+            bt->activeDevice.hfpId = 0;
+        }
+    }
+    if (
+        bt->activeDevice.hfpId == 0 &&
+        bt->activeDevice.a2dpId == 0 &&
+        linkStatus == BM83_DATA_LINK_BACK_RES_FAILED
+    ) {
+        bt->status = BT_STATUS_DISCONNECTED;
+        EventTriggerCallback(BT_EVENT_DEVICE_DISCONNECTED, 0);
+    }
     EventTriggerCallback(BT_EVENT_LINK_BACK_STATUS, eventData);
 }
 
@@ -1130,13 +1586,21 @@ void BM83ProcessEventReportTypeCodec(BT_t *bt, uint8_t *data, uint16_t length)
 void BM83ProcessDataGetAllAttributes(
     BT_t *bt,
     uint8_t *data,
+    uint16_t length,
     uint8_t attributeCount,
     uint16_t bytePos
 ) {
     uint8_t dataDiffers = 0;
     bt->metadataStatus = BT_METADATA_STATUS_CUR;
     uint8_t i = 0;
+    // Keep these out of the loop to limit stack pressure
+    char text[BT_METADATA_MAX_SIZE] = {0};
+    char tempString[BT_METADATA_MAX_SIZE] = {0};
     for (i = 0; i < attributeCount; i++) {
+        if (bytePos >= length) {
+            LogDebug(LOG_SOURCE_BT, "BT: AVRCP Frame Overflow");
+            return;
+        }
         // Skip the 0 pads
         bytePos = bytePos + 3;
         uint8_t attributeType = data[bytePos];
@@ -1145,16 +1609,27 @@ void BM83ProcessDataGetAllAttributes(
         uint16_t attributeLen = (data[bytePos + 1] & 0xFF) | (data[bytePos] << 8);
         // Skip over the length and to the beginning of the data
         bytePos = bytePos + 2;
-        char tempString[BT_METADATA_MAX_SIZE] = {0};
+        memset(text, 0, BT_METADATA_MAX_SIZE);
+        if (
+            attributeType == BM83_AVRCP_DATA_ELEMENT_TYPE_ALBUM ||
+            attributeType == BM83_AVRCP_DATA_ELEMENT_TYPE_ARTIST ||
+            attributeType == BM83_AVRCP_DATA_ELEMENT_TYPE_TITLE
+        ) {
+            memset(tempString, 0, BT_METADATA_MAX_SIZE);
+            uint16_t j = 0;
+            for (j = 0; j < attributeLen; j++) {
+                if (j < BT_METADATA_MAX_SIZE - 1) {
+                    tempString[j] = data[bytePos];
+                }
+                bytePos++;
+            }
+            UtilsNormalizeText(text, tempString, BT_METADATA_MAX_SIZE);
+            if (strlen(text) == 0) {
+                dataDiffers = 1;
+            }
+        }
         switch (attributeType) {
             case BM83_AVRCP_DATA_ELEMENT_TYPE_TITLE: {
-                uint16_t j = 0;
-                for (j = 0; j < attributeLen; j++) {
-                    tempString[j] = data[bytePos];
-                    bytePos++;
-                }
-                char text[BT_METADATA_MAX_SIZE] = {0};
-                UtilsNormalizeText(text, tempString, BT_METADATA_MAX_SIZE);
                 if (memcmp(text, bt->title, BT_METADATA_FIELD_SIZE) != 0) {
                     dataDiffers = 1;
                     memset(bt->title, 0, BT_METADATA_FIELD_SIZE);
@@ -1163,13 +1638,6 @@ void BM83ProcessDataGetAllAttributes(
                 break;
             }
             case BM83_AVRCP_DATA_ELEMENT_TYPE_ARTIST: {
-                uint16_t j = 0;
-                for (j = 0; j < attributeLen; j++) {
-                    tempString[j] = data[bytePos];
-                    bytePos++;
-                }
-                char text[BT_METADATA_MAX_SIZE] = {0};
-                UtilsNormalizeText(text, tempString, BT_METADATA_MAX_SIZE);
                 if (memcmp(text, bt->artist, BT_METADATA_FIELD_SIZE) != 0) {
                     dataDiffers = 1;
                     memset(bt->artist, 0, BT_METADATA_FIELD_SIZE);
@@ -1178,13 +1646,6 @@ void BM83ProcessDataGetAllAttributes(
                 break;
             }
             case BM83_AVRCP_DATA_ELEMENT_TYPE_ALBUM: {
-                uint16_t j = 0;
-                for (j = 0; j < attributeLen; j++) {
-                    tempString[j] = data[bytePos];
-                    bytePos++;
-                }
-                char text[BT_METADATA_MAX_SIZE] = {0};
-                UtilsNormalizeText(text, tempString, BT_METADATA_MAX_SIZE);
                 if (memcmp(text, bt->album, BT_METADATA_FIELD_SIZE) != 0) {
                     dataDiffers = 1;
                     memset(bt->album, 0, BT_METADATA_FIELD_SIZE);
@@ -1224,13 +1685,14 @@ void BM83Process(BT_t *bt)
     uint16_t queueSize = CharQueueGetSize(&bt->uart.rxQueue);
     if (queueSize >= BM83_FRAME_SIZE_MIN && hasStartWord != 0) {
         if (hasStartWord != 1) {
-            LogRawDebug(LOG_SOURCE_BT, "BT: Trash Bytes: ");
-            while (hasStartWord > 1) {
-                uint8_t byte = CharQueueNext(&bt->uart.rxQueue);
-                LogRawDebug(LOG_SOURCE_BT, "%02X ", byte);
-                hasStartWord--;
+            uint16_t trashCount = hasStartWord - 1;
+            uint8_t trashBytes[trashCount];
+            uint16_t i = 0;
+            for (i = 0; i < trashCount; i++) {
+                trashBytes[i] = CharQueueNext(&bt->uart.rxQueue);
             }
-            LogRawDebug(LOG_SOURCE_BT, "\r\n");
+            hasStartWord = 1;
+            LogDebugByteArray(LOG_SOURCE_BT, trashBytes, trashCount, 0, "BT: Trash Bytes");
         }
         uint8_t lengthHigh = CharQueueGetOffset(&bt->uart.rxQueue, 1);
         uint8_t lengthLow = CharQueueGetOffset(&bt->uart.rxQueue, 2);
@@ -1238,32 +1700,27 @@ void BM83Process(BT_t *bt)
         // Get the queue size again in case it has changed
         queueSize = CharQueueGetSize(&bt->uart.rxQueue) - BM83_FRAME_CTRL_BYTE_COUNT;
         if (queueSize >= frameLength && frameLength > 0) {
-            long long unsigned int ts = (long long unsigned int) TimerGetMillis();
-            LogRawDebug(LOG_SOURCE_BT, "[%llu] DEBUG: BM83: RX: ", ts);
-            uint16_t frameSize = frameLength + BM83_FRAME_CTRL_BYTE_COUNT;
             uint16_t dataLength = frameLength - 1;
-            uint8_t eventData[dataLength];
-            memset(eventData, 0, dataLength);
-            uint8_t event = 0x00;
-            uint16_t i = 0;
-            uint16_t j = 0;
+            if (dataLength > BM83_FRAME_DATA_MAX) {
+                LogError("BT: Frame too large: %d", dataLength);
+                return;
+            }
+            uint16_t frameSize = frameLength + BM83_FRAME_CTRL_BYTE_COUNT;
+            uint8_t rawFrame[frameSize];
+            uint16_t i;
+            for (i = 0; i < frameSize; i++) {
+                rawFrame[i] = CharQueueNext(&bt->uart.rxQueue);
+            }
+            uint8_t event = rawFrame[BM83_OFFSET_EVENT_CODE];
+            uint8_t eventData[BM83_FRAME_DATA_MAX];
             // lastIdx is the index of the checksum
             uint16_t lastIdx = frameSize - 1;
-            // Get the data
-            for (i = 0; i < frameSize; i++) {
-                uint8_t byte = CharQueueNext(&bt->uart.rxQueue);
-                LogRawDebug(LOG_SOURCE_BT, "%02X ", byte);
-                if (i == BM83_OFFSET_EVENT_CODE) {
-                    event = byte;
-                }
-                if (i >= BM83_OFFSET_EVENT_DATA &&
-                    i < lastIdx
-                ) {
-                    eventData[j] = byte;
-                    j++;
-                }
+            uint16_t j = 0;
+            for (i = BM83_OFFSET_EVENT_DATA; i < lastIdx; i++) {
+                eventData[j] = rawFrame[i];
+                j++;
             }
-            LogRawDebug(LOG_SOURCE_BT, "\r\n");
+            LogDebugByteArray(LOG_SOURCE_BT, rawFrame, frameSize, 0, "DEBUG: BM83: RX");
             // Always acknowledge reception of the frame first
             if (event != BM83_EVT_COMMAND_ACK) {
                 uint8_t ack[] = {BM83_CMD_EVENT_ACK, event};
@@ -1283,6 +1740,9 @@ void BM83Process(BT_t *bt)
             }
             if (event == BM83_EVT_CALLER_ID) {
                 BM83ProcessEventCallerID(bt, eventData, dataLength);
+            }
+            if (event == BM83_EVT_PBAPC_EVENT) {
+                BM83ProcessEventPBAP(bt, eventData, dataLength);
             }
             if (event == BM83_EVT_READ_LINK_STATUS_REPLY) {
                 BM83ProcessEventReadLinkStatus(bt, eventData, dataLength);
@@ -1313,6 +1773,23 @@ void BM83Process(BT_t *bt)
                     };
                     EventTriggerCallback(BT_EVENT_BTM_ADDRESS, data);
                 }
+            }
+            if (event == BM83_EVT_READ_LOCAL_DEVICE_NAME_REPLY) {
+                uint8_t nameLength = eventData[BM83_FRAME_DB0];
+                if (nameLength > BM83_DEVICE_NAME_MAX_LEN) {
+                    nameLength = BM83_DEVICE_NAME_MAX_LEN;
+                }
+                char nameData[BM83_DEVICE_NAME_MAX_LEN + 1] = {0};
+                char deviceName[BM83_DEVICE_NAME_MAX_LEN + 1] = {0};
+                for (i = 0; i < nameLength && (i + 1) < dataLength; i++) {
+                    nameData[i] = eventData[i + BM83_FRAME_DB1];
+                }
+                UtilsNormalizeText(
+                    deviceName,
+                    nameData,
+                    BM83_DEVICE_NAME_MAX_LEN + 1
+                );
+                LogInfo(LOG_SOURCE_BT, "BT: Module Name: %s", deviceName);
             }
             if (event == BM83_EVT_REPORT_BTM_INITIAL_STATUS) {
                 if (eventData[BM83_FRAME_DB0] ==
@@ -1353,12 +1830,6 @@ void BM83SendCommand(
     size_t size
 ) {
     uint8_t idx = 0;
-    long long unsigned int ts = (long long unsigned int) TimerGetMillis();
-    LogRawDebug(
-        LOG_SOURCE_BT,
-        "[%llu] DEBUG: BM83: TX: AA 00 ",
-        ts
-    );
     uint16_t frameSize = size + BM83_FRAME_CTRL_BYTE_COUNT;
     uint8_t frame[frameSize];
     memset(frame, 0, frameSize);
@@ -1366,16 +1837,13 @@ void BM83SendCommand(
     frame[0] = BM83_UART_START_WORD;
     frame[1] = 0x00;
     frame[2] = size;
-    // Send the length
-    LogRawDebug(LOG_SOURCE_BT, "%02X ", size);
     checksum = checksum - size;
     for (idx = 0; idx < size; idx++) {
         frame[idx + 3] = targetData[idx];
         checksum = checksum - targetData[idx];
-        LogRawDebug(LOG_SOURCE_BT, "%02X ", targetData[idx]);
     }
     checksum++;
-    LogRawDebug(LOG_SOURCE_BT, "%02X\r\n", checksum);
     frame[frameSize - 1] = checksum;
+    LogDebugByteArray(LOG_SOURCE_BT, frame, frameSize, 0, "DEBUG: BM83: TX");
     UARTSendData(&bt->uart, frame, frameSize);
 }

@@ -5,7 +5,17 @@
  *     Implementation of the abstract Bluetooth Module API
  */
 #include "bt.h"
+#include <stdio.h>
+#include <string.h>
+#include "bt/bt_bc127.h"
+#include "bt/bt_bm83.h"
+#include "bt/bt_common.h"
+#include "config.h"
 #include "locale.h"
+#include "log.h"
+#include "timer.h"
+#include "uart.h"
+#include "utils.h"
 
 /**
  * BTInit()
@@ -28,10 +38,13 @@ BT_t BTInit()
     bt.scoStatus = BT_CALL_SCO_CLOSE;
     bt.metadataStatus = BT_METADATA_STATUS_CUR;
     bt.vrStatus = BT_VOICE_RECOG_OFF;
+    bt.pairedDevicesCheck = 0;
     bt.pairedDevicesCount = 0;
+    bt.pairedDevicesFound = 0;
     bt.playbackStatus = BT_AVRCP_STATUS_PAUSED;
     bt.rxQueueAge = 0;
     bt.powerState = BT_STATE_OFF;
+    bt.lastConnection = 0;
     memset(bt.pairedDevices, 0, sizeof(bt.pairedDevices));
     UtilsStrncpy(bt.callerId, LocaleGetText(LOCALE_STRING_VOICE_ASSISTANT), BT_CALLER_ID_FIELD_SIZE);
     memset(bt.dialBuffer, 0, sizeof(bt.dialBuffer));
@@ -47,10 +60,7 @@ BT_t BTInit()
         UART_BAUD_115200,
         UART_PARITY_NONE
     );
-    if (bt.type == BT_BTM_TYPE_BM83) {
-        // The BM83 is not pairable by default
-        bt.discoverable = BT_STATE_OFF;
-    }
+    bt.discoverable = BT_STATE_OFF;
     return bt;
 }
 
@@ -115,7 +125,15 @@ void BTCommandDial(BT_t *bt, const char *number, const char *name)
         while (*number !=0 && pos < BT_DIAL_BUFFER_FIELD_SIZE - 2) {
             char c = *number;
             // ITU-T Recommendation V.250 dial command
-            if ((c=='+')||(c==',')||(c=='#')||(c=='*')||(c>='0'&&c<='9')||(c>='A'&&c<='C')||(c>='a'&&c<='c')) {
+            if (
+                c == '+' ||
+                c == ',' ||
+                c == '#' ||
+                c == '*' ||
+                (c >= '0' && c <= '9') ||
+                (c >= 'A' && c <= 'C') ||
+                (c >= 'a' && c <= 'c')
+            ) {
                 cleannum[pos++]=c;
             }
             number++;
@@ -123,7 +141,7 @@ void BTCommandDial(BT_t *bt, const char *number, const char *name)
         cleannum[pos]=0;
         if (bt->type == BT_BTM_TYPE_BC127) {
             // @FIX
-            char command[32];
+            char command[32] = {0};
             snprintf(command, 32, "CALL %d OUTGOING %s", bt->activeDevice.hfpId, cleannum);
             BC127SendCommand(bt, command);
         } else {
@@ -143,7 +161,7 @@ void BTCommandDial(BT_t *bt, const char *number, const char *name)
  */
 void BTCommandRedial(BT_t *bt)
 {
-    if (bt->activeDevice.hfpId>0) {
+    if (bt->activeDevice.hfpId > 0) {
         if (bt->type == BT_BTM_TYPE_BC127) {
             BC127CommandAT(bt,"+BLDN");
         } else {
@@ -163,9 +181,15 @@ void BTCommandRedial(BT_t *bt)
  */
 void BTCommandConnect(BT_t *bt, BTPairedDevice_t *dev)
 {
+    bt->lastConnection = TimerGetMillis();
+    if (bt->connectable == BT_STATE_OFF) {
+        BTCommandSetConnectable(bt, BT_STATE_ON);
+    }
+    BTClearActiveDevice(bt);
+    bt->activeDevice.deviceIndex = dev->number;
     if (bt->type == BT_BTM_TYPE_BC127) {
-        // Set the MAC ID?
-        BC127CommandProfileOpen(bt, "A2DP");
+        bt->status = BT_STATUS_CONNECTING;
+        BC127CommandProfileOpen(bt, dev, "A2DP");
     } else {
         uint8_t profiles = BM83_DATA_LINK_BACK_PROFILES_A2DP;
         if (ConfigGetSetting(CONFIG_SETTING_HFP) == CONFIG_SETTING_ON) {
@@ -188,6 +212,8 @@ void BTCommandDisconnect(BT_t *bt)
 {
     if (bt->type == BT_BTM_TYPE_BC127) {
         BC127CommandClose(bt, BT_CLOSE_ALL);
+        BTClearActiveDevice(bt);
+        BTClearMetadata(bt);
     } else {
         BM83CommandDisconnect(bt, BM83_CMD_DISCONNECT_PARAM_ALL);
     }
@@ -208,6 +234,28 @@ void BTCommandGetMetadata(BT_t *bt)
         BC127CommandGetMetadata(bt);
     } else {
         BM83CommandAVRCPGetElementAttributesAll(bt);
+    }
+}
+
+/**
+ * BTCommandGetConnectedDeviceName()
+ *     Description:
+ *         Get the device name
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *     Returns:
+ *         void
+ */
+void BTCommandGetConnectedDeviceName(BT_t *bt)
+{
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        BTPairedDevice_t *dev = &bt->pairedDevices[bt->activeDevice.deviceIndex];
+        BC127CommandGetDeviceName(bt, dev);
+    } else {
+        BM83CommandReadLinkedDeviceInformation(
+            bt,
+            BM83_LINKED_DEVICE_QUERY_NAME
+        );
     }
 }
 
@@ -248,6 +296,133 @@ void BTCommandPause(BT_t *bt)
 }
 
 /**
+ * BTCommandPBAPAbort()
+ *     Description:
+ *         Abort an active phonebook download
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *     Returns:
+ *         void
+ */
+void BTCommandPBAPAbort(BT_t *bt)
+{
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        BC127CommandPBAPAbort(bt);
+    } else {
+        BM83CommandPBAPAbort(bt);
+    }
+}
+
+/**
+ * BTCommandPBAPClose()
+ *     Description:
+ *         Close the PBAP session
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *     Returns:
+ *         void
+ */
+void BTCommandPBAPClose(BT_t *bt)
+{
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        BC127CommandPBAPClose(bt);
+    } else {
+        BM83CommandPBAPClose(bt);
+    }
+}
+
+/**
+ * BTCommandPBAPGetPhonebook()
+ *     Description:
+ *         Download contacts from the phone via PBAP
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *         uint8_t phonebook - The phonebook to pull
+ *         uint16_t startIndex - The starting index
+ *         uint8_t maxList - Maximum number of entries to download
+ *     Returns:
+ *         void
+ */
+void BTCommandPBAPGetPhonebook(BT_t *bt, uint8_t phonebook, uint16_t startIndex, uint8_t maxList)
+{
+    uint8_t type;
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        switch (phonebook) {
+            case BT_PBAP_OBJ_FAVORITES:
+            case BT_PBAP_OBJ_PHONEBOOK:
+                type = 1;
+                break;
+            case BT_PBAP_OBJ_INCOMING:
+                type = 2;
+                break;
+            case BT_PBAP_OBJ_OUTGOING:
+                type = 3;
+                break;
+            case BT_PBAP_OBJ_MISSED:
+                type = 4;
+                break;
+            case BT_PBAP_OBJ_COMBINED:
+                type = 5;
+                break;
+            default:
+                LogWarning("BT: Unsupported phonebook type %d for BC127", phonebook);
+                return;
+        }
+        BC127CommandPBAPGetPhonebook(bt, type, startIndex, maxList);
+    } else {
+        // Translate abstract phonebook type to BM83 phonebook object type
+        switch (phonebook) {
+            case BT_PBAP_OBJ_PHONEBOOK:
+                type = BM83_PBAP_OBJ_PHONEBOOK;
+                break;
+            case BT_PBAP_OBJ_INCOMING:
+                type = BM83_PBAP_OBJ_INCOMING;
+                break;
+            case BT_PBAP_OBJ_OUTGOING:
+                type = BM83_PBAP_OBJ_OUTGOING;
+                break;
+            case BT_PBAP_OBJ_MISSED:
+                type = BM83_PBAP_OBJ_MISSED;
+                break;
+            case BT_PBAP_OBJ_COMBINED:
+                type = BM83_PBAP_OBJ_COMBINED;
+                break;
+            case BT_PBAP_OBJ_SPEEDDIAL:
+                type = BM83_PBAP_OBJ_SPEEDDIAL;
+                break;
+            case BT_PBAP_OBJ_FAVORITES:
+                type = BM83_PBAP_OBJ_FAVORITES;
+                break;
+            default:
+                LogWarning("BT: Unsupported phonebook type %d for BM83", phonebook);
+                return;
+        }
+        BM83CommandPBAPGetPhonebook(bt, type, startIndex, maxList);
+    }
+}
+
+/**
+ * BTCommandPBAPOpen()
+ *     Description:
+ *         Open a PBAP profile connection with the active device
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *     Returns:
+ *         void
+ */
+void BTCommandPBAPOpen(BT_t *bt)
+{
+    if (bt->activeDevice.pbapId > 0) {
+        return;
+    }
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        BC127CommandPBAPOpen(bt);
+    } else {
+        BM83CommandPBAPOpen(bt);
+    }
+}
+
+/**
  * BTCommandPlay()
  *     Description:
  *         Resume Playback
@@ -262,6 +437,28 @@ void BTCommandPlay(BT_t *bt)
         BC127CommandPlay(bt);
     } else {
         BM83CommandMusicControl(bt, BM83_CMD_ACTION_PLAY);
+    }
+}
+
+/**
+ * BTCommandPlaybackToggle()
+ *     Description:
+ *         Toggle Playback
+ *     Params:
+ *         BT_t *bt - The Bluetooth context
+ *     Returns:
+ *         void
+ */
+void BTCommandPlaybackToggle(BT_t *bt)
+{
+    if (bt->type == BT_BTM_TYPE_BC127) {
+        if (bt->playbackStatus == BT_AVRCP_STATUS_PLAYING) {
+            BTCommandPause(bt);
+        } else {
+            BTCommandPlay(bt);
+        }
+    } else {
+        BM83CommandMusicControl(bt, BM83_CMD_ACTION_PLAYBACK_TOGGLE);
     }
 }
 
@@ -373,15 +570,6 @@ void BTCommandPlaybackTrackPrevious(BT_t *bt)
     }
 }
 
-void BTCommandProfileOpen(BT_t *bt)//, char *)
-{
-    if (bt->type == BT_BTM_TYPE_BC127) {
-        //BC127CommandProfileOpen(bt);
-    } else {
-        //BM83CommandMusicControl(bt, BM83_CMD_ACTION_PREVIOUS);
-    }
-}
-
 /**
  * BTCommandSetConnectable()
  *     Description:
@@ -396,6 +584,7 @@ void BTCommandSetConnectable(BT_t *bt, uint8_t state)
     if (bt->type == BT_BTM_TYPE_BC127) {
         BC127CommandBtState(bt, state, bt->discoverable);
     } else {
+        bt->connectable = state;
         if (state == BT_STATE_ON) {
             BM83CommandBTMUtilityFunction(
                 bt,
@@ -425,6 +614,7 @@ void BTCommandSetDiscoverable(BT_t *bt, uint8_t state)
 {
     if (bt->type == BT_BTM_TYPE_BC127) {
         BC127CommandBtState(bt, bt->connectable, state);
+        bt->discoverable = state;
     } else {
         if (state == BT_STATE_ON) {
             BM83CommandPairingEnable(bt);
@@ -457,21 +647,6 @@ void BTCommandToggleVoiceRecognition(BT_t *bt)
             BM83CommandVoiceRecognitionOpen(bt);
         }
     }
-}
-
-/**
- * BTHasActiveMacId()
- *     Description:
- *        Check if the Active Device has a MAC ID set
- *     Params:
- *         BT_t *bt - A pointer to the module object
- *     Returns:
- *         void
- */
-uint8_t BTHasActiveMacId(BT_t *bt)
-{
-    uint8_t testMac[BT_LEN_MAC_ID] = {0};
-    return memcmp(bt->activeDevice.macId, testMac, BT_LEN_MAC_ID);
 }
 
 /**

@@ -6,14 +6,9 @@
  */
 #ifndef MID_H
 #define MID_H
-#include "../lib/bt/bt_bc127.h"
-#include "../lib/bt.h"
-#include "../lib/config.h"
-#include "../lib/event.h"
 #include "../lib/ibus.h"
-#include "../lib/log.h"
-#include "../lib/timer.h"
 #include "../lib/utils.h"
+#include "../lib/bt/bt_common.h"
 #include "menu/menu_singleline.h"
 
 #define MID_BUTTON_ONE_L 0x40
@@ -33,17 +28,15 @@
 #define MID_BUTTON_PLAY_R MID_BUTTON_SIX_R
 #define MID_BUTTON_SETTINGS_L MID_BUTTON_FIV_L
 #define MID_BUTTON_SETTINGS_R MID_BUTTON_FIV_R
-//#define MID_BUTTON_MODE_L MID_BUTTON_SIX_L
-//#define MID_BUTTON_MODE_R MID_BUTTON_SIX_R
 
 #define MID_BUTTON_CONNECT_L MID_BUTTON_ONE_L
 #define MID_BUTTON_CONNECT_R MID_BUTTON_ONE_R
 
-#define MID_BUTTON_BACK MID_BUTTON_ONE_L
-#define MID_BUTTON_META MID_BUTTON_ONE_R
 #define MID_BUTTON_EDIT_SAVE MID_BUTTON_ONE_L
 #define MID_BUTTON_PREV_VAL MID_BUTTON_TWO_L
 #define MID_BUTTON_NEXT_VAL MID_BUTTON_TWO_R
+#define MID_BUTTON_OBC_L MID_BUTTON_TRE_L
+#define MID_BUTTON_OBC_R MID_BUTTON_TRE_R
 #define MID_BUTTON_DEVICES_L MID_BUTTON_FOR_L
 #define MID_BUTTON_DEVICES_R MID_BUTTON_FOR_R
 #define MID_BUTTON_PAIR_L MID_BUTTON_FIV_L
@@ -73,33 +66,16 @@
 #define MID_MODE_ACTIVE_NEW 5
 #define MID_MODE_SETTINGS_NEW 6
 #define MID_MODE_DEVICES_NEW 7
+#define MID_MODE_OBC 8
+#define MID_MODE_OBC_NEW 9
+
+#define MID_DISPLAY_METADATA_OFF 0
+#define MID_DISPLAY_METADATA_ON 1
+#define MID_DISPLAY_OBC 2
 
 #define MID_MODE_CHANGE_OFF 0
 #define MID_MODE_CHANGE_PRESS 1
 #define MID_MODE_CHANGE_RELEASE 2
-
-#define MID_PAIRING_DEVICE_NONE -1
-
-#define MID_SETTING_IDX_METADATA_MODE 0
-#define MID_SETTING_IDX_AUTOPLAY 1
-#define MID_SETTING_IDX_AUDIO_DSP 2
-#define MID_SETTING_IDX_LOWER_VOL_REV 3
-#define MID_SETTING_IDX_TEL_HFP 4
-#define MID_SETTING_IDX_TEL_MIC_GAIN 5
-#define MID_SETTING_IDX_TEL_VOL_OFFSET 6
-#define MID_SETTING_IDX_TEL_TCU_MODE 7
-#define MID_SETTING_IDX_BLINKERS 8
-#define MID_SETTING_IDX_COMFORT_LOCKS 9
-#define MID_SETTING_IDX_COMFORT_UNLOCK 10
-#define MID_SETTING_IDX_ABOUT 11
-#define MID_SETTING_IDX_PAIRINGS 12
-
-#define MID_SETTING_MODE_SCROLL_SETTINGS 1
-#define MID_SETTING_MODE_SCROLL_VALUES 2
-#define MID_SETTING_METADATA_MODE_OFF 0x00
-#define MID_SETTING_METADATA_MODE_PARTY 0x01
-#define MID_SETTING_METADATA_MODE_CHUNK 0x02
-
 
 /*
  * MIDContext_t
@@ -110,10 +86,10 @@
  *  screenUpdated: The screen has been updated by the radio
  */
 typedef struct MIDContext_t {
-    IBus_t *ibus;
     BT_t *bt;
-    int8_t btDeviceIndex;
+    IBus_t *ibus;
     uint8_t mode;
+    uint8_t displayMetadata: 2;
     uint8_t displayUpdate;
     uint8_t modeChangeStatus;
     char mainText[16];
@@ -124,7 +100,7 @@ typedef struct MIDContext_t {
 } MIDContext_t;
 void MIDInit(BT_t *, IBus_t *);
 void MIDDestroy();
-void MIDDisplayUpdateText(void *, char *, int8_t, uint8_t);
+void MIDUIDisplayUpdateText(void *ctx, uint8_t *data);
 void MIDBTDeviceConnected(void *, uint8_t *);
 void MIDBTDeviceDisconnected(void *, uint8_t *);
 void MIDBTMetadataUpdate(void *, uint8_t *);
@@ -133,7 +109,6 @@ void MIDIBusCDChangerStatus(void *, uint8_t *);
 void MIDIBusIgnitionStatus(void *, uint8_t *);
 void MIDIBusMIDButtonPress(void *, uint8_t *);
 void MIDIIBusRADMIDDisplayUpdate(void *, uint8_t *);
-void MIDIIBusRADMIDMenuUpdate(void *, uint8_t *);
 void MIDIBusMIDModeChange(void *, uint8_t *);
 void MIDTimerMenuWrite(void *);
 void MIDTimerDisplay(void *);

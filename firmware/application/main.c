@@ -4,8 +4,6 @@
  * Description:
  *     The main loop for our PIC24FJ
  */
-#include <stdlib.h>
-#include <stdio.h>
 #include <xc.h>
 #include "sysconfig.h"
 #include "handler.h"
@@ -106,7 +104,6 @@ int main(void)
         UART_BAUD_115200,
         UART_PARITY_NONE
     );
-
     // Grab the hardware version
     uint8_t boardVersion = UtilsGetBoardVersion();
 
@@ -117,6 +114,7 @@ int main(void)
 
     // Initialize low level modules
     EEPROMInit();
+    UtilsCheckRCON();
     TimerInit();
     I2CInit();
 

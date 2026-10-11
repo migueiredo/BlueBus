@@ -5,6 +5,12 @@
  *     Helper utils that may be useful in more than one place
  */
 #include "utils.h"
+#include <ctype.h>
+#include <string.h>
+#include <xc.h>
+#include "../mappings.h"
+#include "config.h"
+#include "log.h"
 
 static const char UTILS_CHARS_LATIN[] =
     "AAAA\xa1""AACEEEEIIII" /* 00C0-00CF */
@@ -22,6 +28,57 @@ static const char UTILS_CHARS_LATIN[] =
 
 static int8_t BOARD_VERSION = -1;
 
+void UtilsCheckRCON()
+{
+    uint16_t rcon = RCON;
+    // POR and BOR are both set on a normal power-on
+    if ((rcon & 0x0003) == 0x0003 && (rcon & 0xC2F0) == 0) {
+        RCONbits.POR = 0;
+        RCONbits.BOR = 0;
+        return;
+    }
+    // Software Resets shouldn't be logged
+    if (RCONbits.SWR) {
+        RCONbits.SWR = 0;
+        return;
+    }
+    LogError("RCON: 0x%04X", rcon);
+    uint8_t reason = CONFIG_POR_REASON_NONE;
+    if (RCONbits.TRAPR) {
+        LogError("RST: Trap Conflict");
+        reason = CONFIG_POR_REASON_TRAP;
+        RCONbits.TRAPR = 0;
+    }
+    if (RCONbits.IOPUWR) {
+        LogError("RST: Illegal Opcode / Uninitialized W");
+        reason = CONFIG_POR_REASON_ILLEGAL_OP;
+        RCONbits.IOPUWR = 0;
+    }
+    if (RCONbits.CM) {
+        LogError("RST: Configuration Mismatch");
+        reason = CONFIG_POR_REASON_CFG_MISMATCH;
+        RCONbits.CM = 0;
+    }
+    if (RCONbits.EXTR) {
+        LogError("RST: External (MCLR)");
+        reason = CONFIG_POR_REASON_MCLR;
+        RCONbits.EXTR = 0;
+    }
+    if (RCONbits.WDTO) {
+        LogError("RST: Watchdog Timeout");
+        reason = CONFIG_POR_REASON_WDT;
+        RCONbits.WDTO = 0;
+    }
+    if (RCONbits.BOR && !(rcon & 0x0001)) {
+        LogError("RST: Brown-out");
+        reason = CONFIG_POR_REASON_BROWNOUT;
+        RCONbits.BOR = 0;
+    }
+    RCONbits.POR = 0;
+    ConfigSetByte(CONFIG_POR_REASON, reason);
+
+}
+
 /**
  * UtilsConvertCmToIn()
  *     Description:
@@ -35,6 +92,42 @@ uint8_t UtilsConvertCmToIn(uint8_t cm)
 {
     float impVal = cm / 2.54;
     return (int)(impVal < 0 ? (impVal - 0.5) : (impVal + 0.5));
+}
+
+/**
+ * UtilsConvertCelsiusToFahrenheit()
+ *     Description:
+ *         Convert Celsius to the nearest whole degree Freedom using integer
+ *         math.
+ *     Params:
+ *         int16_t celsius - The temperature in Celsius
+ *     Returns:
+ *         int16_t The converted and rounded value in Freedom
+ */
+int16_t UtilsConvertCelsiusToFahrenheit(int16_t celsius)
+{
+    int32_t tenths = (int32_t) celsius * 18;
+    if (tenths < 0) {
+        tenths -= 5;
+    } else {
+        tenths += 5;
+    }
+    return (int16_t) ((tenths / 10) + 32);
+}
+
+/**
+ * UtilsConvertKmToMi()
+ *     Description:
+ *         Convert Kilometers to the nearest whole mile using integer math.
+ *         1 mile is 1.609344 km, which reduces to the ratio 15625 / 25146.
+ *     Params:
+ *         uint16_t km - Kilometers
+ *     Returns:
+ *         uint16_t The converted and rounded value in miles
+ */
+uint16_t UtilsConvertKmToMi(uint16_t km)
+{
+    return (uint16_t) ((((uint32_t) km * 15625) + 12573) / 25146);
 }
 
 /**
@@ -251,7 +344,56 @@ void UtilsNormalizeText(char *string, const char *input, uint16_t max_len)
 }
 
 /**
- * UtilsRemoveSubstring()
+ * UtilsSubstrExists()
+ *     Description:
+ *         Check if a substring exists within the first `length` bytes of a
+ *         string. If `boundary` is non-zero, only check positions immediately
+ *         following that boundary character (or the start of the string).
+ *     Params:
+ *         const char *haystack - The string to search in
+ *         uint8_t length - Number of bytes to search within
+ *         const char *needle - The substring to find
+ *         char boundary - Boundary character to anchor searches, or 0 to
+ *             search every position
+ *     Returns:
+ *         uint8_t - 1 if found, 0 otherwise
+ */
+uint8_t UtilsSubstrExists(
+    const char *haystack,
+    uint8_t length,
+    const char *needle,
+    char boundary
+) {
+    uint8_t needleLen = strlen(needle);
+    if (length < needleLen) {
+        return 0;
+    }
+    if (boundary != 0) {
+        uint8_t i = 0;
+        // Check at start of string
+        if (memcmp(haystack, needle, needleLen) == 0) {
+            return 1;
+        }
+        for (i = 0; i < length; i++) {
+            if (haystack[i] == boundary && i + 1 + needleLen <= length) {
+                if (memcmp(haystack + i + 1, needle, needleLen) == 0) {
+                    return 1;
+                }
+            }
+        }
+    } else {
+        uint8_t i;
+        for (i = 0; i + needleLen <= length; i++) {
+            if (memcmp(haystack + i, needle, needleLen) == 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * UtilsSubstrRemove()
  *     Description:
  *         Remove the given substring from the given subject
  *     Params:
@@ -260,7 +402,7 @@ void UtilsNormalizeText(char *string, const char *input, uint16_t max_len)
  *     Returns:
  *         void
  */
-void UtilsRemoveSubstring(char *string, const char *trash)
+void UtilsSubstrRemove(char *string, const char *trash)
 {
     uint16_t removeLength = strlen(trash);
     while ((string = strstr(string, trash))) {
@@ -302,7 +444,7 @@ void UtilsSetRPORMode(uint8_t pin, uint16_t mode)
     if (pin > 1) {
         regNum = pin / 2;
     }
-    volatile uint16_t *PROG_PIN = GET_RPOR(regNum);
+    volatile uint16_t *PROG_PIN = UTILS_GET_RPOR(regNum);
     if ((pin % 2) == 0) {
         uint16_t msb = *PROG_PIN >> 8;
         // Set the least significant bits for the even pin number
@@ -377,6 +519,7 @@ int8_t UtilsStricmp(const char *string, const char *compare)
  */
 char * UtilsStrncpy(char *dest, const char *src, size_t size)
 {
+    // Size - 1 to avoid copying a character we would just override anyways
     strncpy(dest, src, size - 1);
     dest[size - 1] = '\0';
     return dest;
@@ -410,6 +553,27 @@ uint8_t UtilsStrToInt(char *string)
 {
     char *ptr;
     return (uint8_t) strtol(string, &ptr, 10);
+}
+
+/**
+ * UtilsCharIndex()
+ *     Description:
+ *         Find the first instance of needle in haystack `string`
+ *     Params:
+ *         char *string - The subject
+ *         uint8_t needle - The char to look for
+ *     Returns:
+ *         int16_t The index of the given needle or -1 for not found
+ */
+int16_t UtilsCharIndex(char *string, uint8_t needle)
+{
+    uint16_t i = 0;
+    for (i = 0; i < strlen(string); i++) {
+        if (string[i] == needle) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 /**

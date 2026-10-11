@@ -5,6 +5,14 @@
  *     EEPROM mechanisms
  */
 #include "eeprom.h"
+#include "../mappings.h"
+
+// Detected EEPROM Address width
+static uint8_t EEPROM_ADDRESS_WIDTH = EEPROM_ADDRESS_WIDTH_16;
+
+static void EEPROMIsReady();
+static void EEPROMProbeAddressWidth();
+static uint8_t EEPROMSend(char);
 
 /**
  * EEPROMInit()
@@ -35,46 +43,13 @@ void EEPROMInit()
     SPI1STATLbits.SPIROV = 0;
     // Enable Module | Set CKE to active -> idle | Master Enable
     SPI1CON1L = 0b1000000100100000;
-}
-
-/**
- * EEPROMSend()
- *     Description:
- *         Write to the SPI buffer and return the received value
- *     Params:
- *         char data - The data to transfer to the EEPROM
- *     Returns:
- *         unsigned char - The 8-bit byte returned from the EEPROM
- */
-static unsigned char EEPROMSend(char data)
-{
-    SPI1BUFL = data;
-    while (!SPI1STATLbits.SPIRBF);
-    return SPI1BUFL;
-}
-
-/**
- * EEPROMEnableWrite()
- *     Description:
- *         Perform the necessary actions to set up the EEPROM for writing
- *     Params:
- *         void
- *     Returns:
- *         void
- */
-static void EEPROMEnableWrite()
-{
-    // Wait until EEPROM is not busy
-    EEPROMIsReady();
-    EEPROM_CS_PIN = 0;
-    EEPROMSend(EEPROM_COMMAND_WREN);
-    EEPROM_CS_PIN = 1;
+    EEPROMProbeAddressWidth();
 }
 
 /**
  * EEPROMDestroy()
  *     Description:
- *         Destory the EEPROM configuration so that the application can use the
+ *         Destroy the EEPROM configuration so that the application can use the
  *         SPI module again
  *     Params:
  *         void
@@ -104,6 +79,23 @@ void EEPROMDestroy()
 }
 
 /**
+ * EEPROMEnableWrite()
+ *     Description:
+ *         Perform the necessary actions to set up the EEPROM for writing
+ *     Params:
+ *         void
+ *     Returns:
+ *         void
+ */
+static void EEPROMEnableWrite()
+{
+    EEPROMIsReady();
+    EEPROM_CS_PIN = 0;
+    EEPROMSend(EEPROM_COMMAND_WREN);
+    EEPROM_CS_PIN = 1;
+}
+
+/**
  * EEPROMIsReady()
  *     Description:
  *         Check with the EEPROM to see if it's ready to be written to. If it
@@ -113,7 +105,7 @@ void EEPROMDestroy()
  *     Returns:
  *         void
  */
-void EEPROMIsReady()
+static void EEPROMIsReady()
 {
     char status = EEPROM_STATUS_BUSY;
     while (status & EEPROM_STATUS_BUSY) {
@@ -125,31 +117,75 @@ void EEPROMIsReady()
 }
 
 /**
+ * EEPROMProbeAddressWidth()
+ *     Description:
+ *         EEPROM Address Width detection exists because the unit has used multiple
+ *         EEPROM sizes, some that require 24-bit addressing and other that
+ *         require 16-bit. This works by writing a FLAG byte to the top of
+ *         128kB EEPROM space, then reading it back twice. If we have a part
+ *         with 24-bit addressing, when the response will NOP and we will not
+ *         receive our FLAG value back.
+ *     Params:
+ *         void
+ *     Returns:
+ *         void
+ */
+static void EEPROMProbeAddressWidth()
+{
+    EEPROM_ADDRESS_WIDTH = EEPROM_ADDRESS_WIDTH_16;
+    // The flag persists across boots, so this write only happens once
+    if (EEPROMReadByte(EEPROM_PROBE_ADDRESS) != EEPROM_PROBE_FLAG) {
+        EEPROMWriteByte(EEPROM_PROBE_ADDRESS, EEPROM_PROBE_FLAG);
+    }
+    // Probe twice to protect against line noise
+    if (
+        EEPROMReadByte(EEPROM_PROBE_ADDRESS) != EEPROM_PROBE_FLAG ||
+        EEPROMReadByte(EEPROM_PROBE_ADDRESS) != EEPROM_PROBE_FLAG
+    ) {
+        EEPROM_ADDRESS_WIDTH = EEPROM_ADDRESS_WIDTH_24;
+    }
+}
+
+/**
  * EEPROMReadByte()
  *     Description:
  *         Read a byte from the EEPROM at the given address and return it
  *     Params:
  *         uint32_t - The memory address of the byte to retrieve
  *     Returns:
- *         unsigned char - The byte at the given address
+ *         uint8_t - The byte at the given address
  */
-unsigned char EEPROMReadByte(uint32_t address)
+uint8_t EEPROMReadByte(uint32_t address)
 {
     EEPROMIsReady();
     EEPROM_CS_PIN = 0;
     EEPROMSend(EEPROM_COMMAND_READ);
-    // The HW1 boards use a 1024kB EEPROM while the HW2 boards use a
-    // 128kB EEPROM. This means that we need not send as any address bytes
-    if (UtilsGetBoardVersion() == BOARD_VERSION_ONE) {
-        EEPROMSend(address >> 16 && 0xFF);
+    if (EEPROM_ADDRESS_WIDTH == EEPROM_ADDRESS_WIDTH_24) {
+        EEPROMSend(address >> 16 & 0xFF);
     }
-    EEPROMSend(address >> 8 && 0xFF);
+    EEPROMSend(address >> 8 & 0xFF);
     EEPROMSend(address & 0xFF);
     // Cast return of EEPROM send to an 8-bit byte, since the returned register
     // is always 16 bits
-    unsigned char data = (unsigned char)((uint8_t )EEPROMSend(EEPROM_COMMAND_GET));
+    uint8_t data = (uint8_t) EEPROMSend(EEPROM_COMMAND_GET);
     EEPROM_CS_PIN = 1;
     return data;
+}
+
+/**
+ * EEPROMSend()
+ *     Description:
+ *         Write to the SPI buffer and return the received value
+ *     Params:
+ *         char data - The data to transfer to the EEPROM
+ *     Returns:
+ *         uint8_t - The 8-bit byte returned from the EEPROM
+ */
+static uint8_t EEPROMSend(char data)
+{
+    SPI1BUFL = data;
+    while (!SPI1STATLbits.SPIRBF);
+    return SPI1BUFL;
 }
 
 /**
@@ -159,21 +195,19 @@ unsigned char EEPROMReadByte(uint32_t address)
  *         is not, this function blocks until it is ready (status 0x00).
  *     Params:
  *         uint32_t address - The memory address of the byte to retrieve
- *         unsigned char data - The 8-bit byte to write
+ *         uint8_t data - The 8-bit byte to write
  *     Returns:
  *         void
  */
-void EEPROMWriteByte(uint32_t address, unsigned char data)
+void EEPROMWriteByte(uint32_t address, uint8_t data)
 {
     EEPROMEnableWrite();
     EEPROM_CS_PIN = 0;
     EEPROMSend(EEPROM_COMMAND_WRITE);
-    // The HW1 boards use a 1024kB EEPROM while the HW2 boards use a
-    // 128kB EEPROM. This means that we need not send as any address bytes
-    if (UtilsGetBoardVersion() == BOARD_VERSION_ONE) {
-        EEPROMSend(address >> 16 && 0xFF);
+    if (EEPROM_ADDRESS_WIDTH == EEPROM_ADDRESS_WIDTH_24) {
+        EEPROMSend(address >> 16 & 0xFF);
     }
-    EEPROMSend(address >> 8 && 0xFF);
+    EEPROMSend(address >> 8 & 0xFF);
     EEPROMSend(address & 0xFF);
     EEPROMSend(data);
     EEPROM_CS_PIN = 1;

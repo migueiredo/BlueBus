@@ -6,9 +6,8 @@
  */
 #ifndef HANDLER_CONTEXT_H
 #define HANDLER_CONTEXT_H
-#include "../lib/bt.h"
+#include "../lib/bt/bt_common.h"
 #include "../lib/ibus.h"
-#include "../lib/pcm51xx.h"
 
 
 #define HANDLER_BT_BOOT_OK 0
@@ -18,16 +17,16 @@
 #define HANDLER_BT_BOOT_MFB_L 1
 #define HANDLER_BT_BOOT_MFB_H 2
 
-#define HANDLER_BT_SELECTED_DEVICE_NONE -1
+#define HANDLER_BT_SELECTED_DEVICE_NONE 0xF
+#define HANDLER_BT_STATUS_NONE 0
+#define HANDLER_BT_STATUS_CONNECTING 1
 #define HANDLER_BT_METADATA_TIMEOUT 2000
-#define HANDLER_BT_AUTOPLAY_NOT_RUN 0
-#define HANDLER_BT_AUTOPLAY_RUN 1
 #define HANDLER_CDC_ANOUNCE_TIMEOUT 21000
 #define HANDLER_CDC_SEEK_MODE_NONE 0
 #define HANDLER_CDC_SEEK_MODE_FWD 1
 #define HANDLER_CDC_SEEK_MODE_REV 2
 #define HANDLER_CDC_STATUS_TIMEOUT 20000
-#define HANDLER_DEVICE_MAX_RECONN 15
+#define HANDLER_DEVICE_MAX_RECONN 1
 #define HANDLER_IBUS_MODULE_PING_STATE_OFF 0
 #define HANDLER_IBUS_MODULE_PING_STATE_READY 1
 #define HANDLER_IBUS_MODULE_PING_STATE_IKE 2
@@ -39,16 +38,22 @@
 #define HANDLER_IBUS_MODULE_PING_STATE_RAD 8
 #define HANDLER_IBUS_MODULE_PING_STATE_LM 9
 #define HANDLER_IBUS_MODULE_PING_STATE_TEL 10
+#define HANDLER_IBUS_MODULE_PING_STATE_GM 11
 #define HANDLER_GT_STATUS_UNCHECKED 0
 #define HANDLER_GT_STATUS_CHECKED 1
+#define HANDLER_ZKE_UNLOCK_STATE_OFF 0
+#define HANDLER_ZKE_UNLOCK_STATE_UNLOCKING 1
+#define HANDLER_ZKE_LOCK_STATE_OFF 0
+#define HANDLER_ZKE_LOCK_STATE_LOCKING 1
 #define HANDLER_INT_BC127_STATE 1000
 #define HANDLER_INT_CDC_ANOUNCE 1000
 #define HANDLER_INT_CDC_STATUS 500
-#define HANDLER_INT_DEVICE_CONN 30000
 #define HANDLER_INT_DEVICE_SCAN 5000
+#define HANDLER_INT_IBUS_IDENT 60000
 #define HANDLER_INT_IBUS_PINGS 250
 #define HANDLER_INT_TCU_STATE_CHANGE 100
-#define HANDLER_INT_LCM_IO_STATUS 15000
+#define HANDLER_INT_LCM_IO_STATUS 5000
+#define HANDLER_LCM_IO_TIMEOUT 15000
 #define HANDLER_INT_LIGHTING_STATE 1000
 #define HANDLER_INT_BT_AVRCP_UPDATER 1000
 #define HANDLER_INT_BT_AVRCP_UPDATER_METADATA 250
@@ -58,9 +63,7 @@
 #define HANDLER_INT_BM83_POWER_RESET 200
 #define HANDLER_INT_BM83_POWER_MFB_ON 150
 #define HANDLER_INT_BM83_POWER_MFB_OFF 500
-#define HANDLER_INT_PDC_DISTANCE 250
-#define HANDLER_LCM_STATUS_BLINKER_OFF 0
-#define HANDLER_LCM_STATUS_BLINKER_ON 1
+#define HANDLER_INT_PDC_DISTANCE 750
 #define HANDLER_LM_BLINK_OFF 0x00
 #define HANDLER_LM_BLINK_LEFT 0x01
 #define HANDLER_LM_BLINK_RIGHT 0x02
@@ -68,54 +71,119 @@
 #define HANDLER_LM_COMF_BLINK_LEFT 0x01
 #define HANDLER_LM_COMF_BLINK_RIGHT 0x02
 #define HANDLER_LM_COMF_PARKING_OFF 0x00
-#define HANDLER_LM_COMF_PARKING_ON 0x01
+#define HANDLER_LM_COMF_PARKING_FRONT 0x01
+#define HANDLER_LM_COMF_PARKING_FRONT_AND_REAR 0x02
+#define HANDLER_LM_HOME_LIGHT_INTERVALS 30
 #define HANDLER_LM_EVENT_REFRESH 0x00
 #define HANDLER_LM_EVENT_ALL_OFF 0x01
 #define HANDLER_LM_EVENT_BLINK_OFF 0x02
 #define HANDLER_LM_EVENT_BLINK_LEFT 0x03
 #define HANDLER_LM_EVENT_BLINK_RIGHT 0x04
 #define HANDLER_LM_EVENT_PARKING_OFF 0x05
-#define HANDLER_LM_EVENT_PARKING_ON 0x06
-#define HANDLER_LCM_TRIGGER_OFF 0
-#define HANDLER_LCM_TRIGGER_ON 1
+#define HANDLER_LM_EVENT_PARKING_FRONT 0x06
+#define HANDLER_LM_EVENT_PARKING_FRONT_AND_REAR 0x10
+#define HANDLER_LM_EVENT_HOME_WELCOME 0x07
+#define HANDLER_LM_EVENT_HOME_FOLLOW 0x08
+#define HANDLER_LM_EVENT_HOME_OFF 0x09
 #define HANDLER_MFL_STATUS_OFF 0
 #define HANDLER_MFL_STATUS_SPEAK_HOLD 1
 #define HANDLER_POWER_OFF 0
 #define HANDLER_POWER_ON 1
 #define HANDLER_POWER_TIMEOUT_MILLIS 61000
-#define HANDLER_TEL_DAC_VOL 0x44
+#define HANDLER_KL99_RAD_TIMEOUT_MILLIS 60000
 #define HANDLER_TEL_MODE_AUDIO 0
 #define HANDLER_TEL_MODE_TCU 1
 #define HANDLER_TEL_STATUS_SET 0
 #define HANDLER_TEL_STATUS_FORCE 1
 #define HANDLER_TEL_STATUS_VOL_CHANGE 0xFF
+#define HANDLER_TEL_OFF 0
+#define HANDLER_TEL_ON 1
 #define HANDLER_WAIT_REV_VOL 1000
 #define HANDLER_MONITOR_STATUS_UNSET 0
 #define HANDLER_MONITOR_STATUS_POWERED_OFF 1
 #define HANDLER_MONITOR_STATUS_POWERED_ON 2
 
+#define HANDLER_PDC_MAX_TICKS 12
+
 #define HANDLER_VOLUME_DIRECTION_DOWN 0
 #define HANDLER_VOLUME_DIRECTION_UP 1
 #define HANDLER_VOLUME_MODE_LOWERED 0
 #define HANDLER_VOLUME_MODE_NORMAL 1
+#define HANDLER_VOLUME_STEPS 6
 
 typedef struct HandlerBodyModuleStatus_t {
     uint8_t lowSideDoors: 1;
     uint8_t doorsLocked: 1;
+    uint8_t unlockState: 1;
+    uint8_t lockState: 1;
 } HandlerBodyModuleStatus_t;
 
+/**
+ * HandlerLightControlStatus_t
+ *    blinkerCount: Number of blinks executed
+ *    blinkMode: The currently engaged blinker mode
+ *    blinkStatus: The currently active blinker
+ *    parkingLampMode: If parking lamps are active or not
+ *    homeLightsMode: The current home lights mode
+ *    homeLightsArmed: Bool for arming follow-me-home lights
+ *    homeLightsTicks: Track timer ticks for home light timeout
+ */
 typedef struct HandlerLightControlStatus_t {
+    uint8_t blinkCount: 4;
+    uint8_t blinkMode: 2;
     uint8_t blinkStatus: 2;
-    uint8_t blinkCount: 8;
-    uint8_t comfortBlinkerStatus: 2;
-    uint8_t comfortParkingLampsStatus: 1;
+    uint8_t parkingLampsMode: 2;
+    uint8_t homeLightsMode: 2;
+    uint8_t homeLightsArmed: 1;
+    uint8_t homeLightsTicks;
 } HandlerLightControlStatus_t;
 
+/**
+ * HandlerContext_t
+ *  *bt:
+ *  *ibus:
+ *  btDeviceConnRetries:
+ *  btSelectedDevice:
+ *  btStatus:
+ *  btStartupIsRun:
+ *  btBootState:
+ *  btAutoplay:
+ *  ibusModulePingState:
+ *  mflButtonStatus:
+ *  seekMode:
+ *  volumeMode:
+ *  gtStatus:
+ *  monitorStatus:
+ *  pdcActive:
+ *  pdcInactivityTicks:
+ *  telOnStatus:
+ *  telMode: Track the last call mode we used rather than deriving it from state
+ *  telVolSteps: The number of volume steps we sent to the radio
+ *  uiMode:
+ *  lmDimmerChecksum:
+ *  telStatus:
+ *  gmState:
+ *  lmState:
+ *  powerStatus:
+ *  scanIntervals:
+ *  deviceScanTimerId:
+ *  tcuStateChangeTimerId:
+ *  lightingStateTimerId:
+ *  avrcpRegisterStatusNotifierTimerId:
+ *  bm83PowerStateTimerId:
+ *  cdChangerLastPoll:
+ *  cdChangerLastStatus:
+ *  gearLastStatus:
+ *  lmLastIOStatus:
+ *  lmLastStatusSet:
+ *  radLastMessage:
+ */
 typedef struct HandlerContext_t {
     BT_t *bt;
     IBus_t *ibus;
     uint8_t btDeviceConnRetries;
-    int8_t btSelectedDevice: 4;
+    uint8_t btSelectedDevice: 4;
+    uint8_t btStatus: 1;
     uint8_t btStartupIsRun: 1;
     uint8_t btBootState: 2;
     uint8_t btAutoplay: 1;
@@ -126,6 +194,10 @@ typedef struct HandlerContext_t {
     uint8_t gtStatus: 1;
     uint8_t monitorStatus: 2;
     uint8_t pdcActive: 1;
+    uint8_t pdcInactivityTicks: 4;
+    uint8_t telOnStatus: 1;
+    uint8_t telMode: 1;
+    uint8_t telVolSteps: 4;
     uint8_t uiMode;
     uint8_t lmDimmerChecksum;
     uint8_t telStatus;
@@ -133,6 +205,7 @@ typedef struct HandlerContext_t {
     HandlerLightControlStatus_t lmState;
     uint8_t powerStatus;
     uint8_t scanIntervals;
+    uint8_t deviceScanTimerId;
     uint8_t tcuStateChangeTimerId;
     uint8_t lightingStateTimerId;
     uint8_t avrcpRegisterStatusNotifierTimerId;
@@ -142,11 +215,11 @@ typedef struct HandlerContext_t {
     uint32_t gearLastStatus;
     uint32_t lmLastIOStatus;
     uint32_t lmLastStatusSet;
-    uint32_t pdcLastStatus;
     uint32_t radLastMessage;
 } HandlerContext_t;
 
 uint8_t HandlerGetTelMode(HandlerContext_t *);
-uint8_t HandlerSetIBusTELStatus(HandlerContext_t *, unsigned char);
+uint8_t HandlerGetIBusTELStatus(HandlerContext_t *);
+uint8_t HandlerSetIBusTELStatus(HandlerContext_t *, uint8_t);
 void HandlerSetVolume(HandlerContext_t *, uint8_t);
 #endif /* HANDLER_CONTEXT_H */

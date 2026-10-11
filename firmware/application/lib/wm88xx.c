@@ -5,6 +5,9 @@
  *     Utilities for use with the on-board WM8804 I2S transceiver
  */
 #include "wm88xx.h"
+#include "i2c.h"
+#include "timer.h"
+#include "log.h"
 
 /**
  * WM88XXInit()
@@ -59,7 +62,7 @@ void WM88XXInit()
         if (status != 0x00) {
             LogError("WM88XX failed to set TXSRC [%d]", status);
         }
-    
+
         /**
          * Register 27 - AIFTX
          * bit 7:6 - always 0
@@ -72,7 +75,7 @@ void WM88XXInit()
         if (status != 0x00) {
             LogError("WM88XX failed to set AIFTX [%d]", status);
         }
-        
+
         /**
          * Register 28 - AIFRX
          * bit   7 - Keep BLCK/LRCK Enabled always - 0 is no or 1 yes
@@ -86,10 +89,10 @@ void WM88XXInit()
         if (status != 0x00) {
             LogError("WM88XX failed to set AIFRX [%d]", status);
         }
-        
+
         /**
          * Set the PLL_N and PLL_K factors
-         * 
+         *
          * Register 6 - PLL_N
          *
          * PLL_K to 36FD21
@@ -113,7 +116,7 @@ void WM88XXInit()
         if (status != 0x00) {
             LogError("WM88XX failed to set third bit of PLL_K [%d]", status);
         }
-        
+
         /**
          * Register 29 - SPDRX1
          * bit   7 - SPD_192K_EN - 192khz Streams disabled 0 or enabled 1

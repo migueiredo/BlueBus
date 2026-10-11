@@ -6,19 +6,9 @@
  */
 #ifndef CLI_H
 #define CLI_H
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include "../mappings.h"
-#include "../lib/bt/bt_bc127.h"
-#include "../lib/bt/bt_bm83.h"
-#include "../lib/bt.h"
-#include "../lib/char_queue.h"
-#include "../lib/config.h"
-#include "../lib/i2c.h"
+#include "../lib/bt/bt_common.h"
 #include "../lib/ibus.h"
 #include "../lib/pcm51xx.h"
-#include "../lib/timer.h"
 #include "../lib/uart.h"
 
 // Banner timeout is in seconds
@@ -46,9 +36,13 @@ typedef struct CLI_t {
     uint8_t terminalReady;
 } CLI_t;
 void CLIInit(UART_t *, BT_t *, IBus_t *);
+void CLIEventWriteBefore(void *, unsigned char *);
+void CLIEventWriteComplete(void *, unsigned char *);
+void CLIWrite(const char *, ...);
 void CLICommandBTBC127(char **, uint8_t *, uint8_t);
 void CLICommandBTBM83(char **, uint8_t *, uint8_t);
 void CLIEventBTBTMAddress(void *, uint8_t *);
+void CLIEventPBAPContactReceived(void *, uint8_t *);
 void CLIProcess();
 void CLITimerTerminalReady(void *);
 #endif /* CLI_H */

@@ -5,6 +5,8 @@
  *     Implement Upgrade Tasks
  */
 #include "upgrade.h"
+#include "lib/bt/bt_common.h"
+#include "lib/config.h"
 
 /**
  * UpgradeProcess()
@@ -37,7 +39,7 @@ uint8_t UpgradeProcess(BT_t *bt, IBus_t *ibus)
         ConfigSetVehicleIdentity(vin);
         // Reset all settings
         uint8_t idx = CONFIG_SETTING_START_ADDRESS;
-        while (idx <= 0x50) {
+        while (idx <= CONFIG_SETTING_END_ADDRESS) {
             ConfigSetSetting(idx, 0x00);
             idx++;
         }
@@ -103,7 +105,6 @@ uint8_t UpgradeProcess(BT_t *bt, IBus_t *ibus)
     }
     // Changes in version 1.1.18
     if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 1, 18) == 1) {
-        ConfigSetSetting(CONFIG_SETTING_MANAGE_VOLUME, CONFIG_SETTING_ON);
         ConfigSetSetting(CONFIG_SETTING_VOLUME_LOWER_ON_REV, CONFIG_SETTING_ON);
         BC127CommandSetCOD(bt, 300420);
         LogRaw("Ran Upgrade 1.1.18\r\n");
@@ -125,14 +126,31 @@ uint8_t UpgradeProcess(BT_t *bt, IBus_t *ibus)
     }
     // Changes in version 1.3.2
     if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 3, 2) == 1) {
-        ConfigSetSetting(CONFIG_SETTING_LAST_CONNECTED_DEVICE_MAC,0x00);
         LogRaw("Ran Upgrade 1.3.2\r\n");
     }
     // Changes in version 1.4.0
     if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 4, 0) == 1) {
         ConfigSetSetting(CONFIG_SETTING_COMFORT_AUTOZOOM, CONFIG_SETTING_OFF);
-        ConfigSetSetting(CONFIG_SETTING_COMFORT_PDC, CONFIG_SETTING_OFF);
+        ConfigSetSetting(CONFIG_SETTING_VISUAL_PDC, CONFIG_SETTING_OFF);
+        ConfigSetSetting(CONFIG_SETTING_NAV, CONFIG_SETTING_OFF);
+        ConfigSetSetting(CONFIG_SETTING_AUTO_TIME, CONFIG_SETTING_OFF);
         LogRaw("Ran Upgrade 1.4.0\r\n");
+    }
+    if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 4, 6) == 1) {
+        if (bt->type == BT_BTM_TYPE_BC127) {
+            BC127CommandSetBtState(bt, BT_STATE_OFF, BT_STATE_OFF);
+            BC127CommandWrite(bt);
+        }
+    }
+    // Changes in version 1.4.7
+    if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 4, 7) == 1) {
+        ConfigSetSetting(CONFIG_SETTING_LM_IO_POLL_DISABLED, CONFIG_SETTING_OFF);
+        LogRaw("Ran Upgrade 1.4.7\r\n");
+    }
+    // Changes in version 1.4.42
+    if (UpgradeVersionCompare(curMajor, curMinor, curPatch, 1, 4, 42) == 1) {
+        ConfigSetSetting(CONFIG_SETTING_HEADLESS, CONFIG_SETTING_OFF);
+        LogRaw("Ran Upgrade 1.4.42\r\n");
     }
     ConfigSetFirmwareVersion(
         FIRMWARE_VERSION_MAJOR,
